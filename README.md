@@ -2,6 +2,8 @@
 
 `code-index` builds a local SQLite index for source-code navigation. It is intended for LLM and agent workflows that should query code structure through SQL instead of repeatedly using grep-style text search.
 
+It is not intended to replace language servers, VCS indexes, or full code-intelligence systems; it provides a small, local, queryable index that agents can rebuild cheaply.
+
 The binary is written in Go and uses the `sqlite3` command for database creation and queries. The built binary does not require a Go runtime.
 
 ## Build
@@ -51,6 +53,45 @@ Show indexed code metrics:
 ```
 
 The default database is stored under `CODE_INDEX_CACHE_DIR` when set. Otherwise it uses `$XDG_CACHE_HOME/code-index` or `~/.cache/code-index`, keyed by the absolute repository path. Use `--db` to provide an explicit database path.
+
+## Git Hooks
+
+You can rebuild the local index automatically after branch checkouts and merges. These hooks are optional and only run when `code-index` is available on `PATH`.
+
+Refresh the index after switching branches:
+
+```sh
+cat > .git/hooks/post-checkout <<'EOF'
+#!/bin/sh
+# Args: previous HEAD, new HEAD, branch checkout flag.
+[ "$3" = "1" ] || exit 0
+
+root="$(git rev-parse --show-toplevel)" || exit 0
+command -v code-index >/dev/null 2>&1 || exit 0
+
+(
+  code-index build "$root" >/dev/null 2>&1
+) &
+EOF
+chmod +x .git/hooks/post-checkout
+```
+
+Refresh the index after pulls or merges:
+
+```sh
+cat > .git/hooks/post-merge <<'EOF'
+#!/bin/sh
+root="$(git rev-parse --show-toplevel)" || exit 0
+command -v code-index >/dev/null 2>&1 || exit 0
+
+(
+  code-index build "$root" >/dev/null 2>&1
+) &
+EOF
+chmod +x .git/hooks/post-merge
+```
+
+The examples run in the background so Git commands do not wait for indexing. If a query runs while the hook is rebuilding the database, retry the query after the rebuild finishes.
 
 ## Schema
 
