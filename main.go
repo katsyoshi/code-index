@@ -1,0 +1,887 @@
+package main
+
+import (
+	"crypto/sha1"
+	"encoding/hex"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"io/fs"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+	"unicode/utf8"
+)
+
+var ignoredDirs = map[string]bool{
+	".bundle":        true,
+	".cache":         true,
+	".git":           true,
+	".gradle":        true,
+	".hg":            true,
+	".idea":          true,
+	".mypy_cache":    true,
+	".pytest_cache":  true,
+	".ruff_cache":    true,
+	".svn":           true,
+	".terraform":     true,
+	".venv":          true,
+	".vscode":        true,
+	"__pycache__":    true,
+	"bazel-bin":      true,
+	"bazel-out":      true,
+	"bazel-testlogs": true,
+	"build":          true,
+	"coverage":       true,
+	"deps":           true,
+	"dist":           true,
+	"node_modules":   true,
+	"out":            true,
+	"pkg":            true,
+	"target":         true,
+	"tmp":            true,
+	"vendor":         true,
+	"venv":           true,
+}
+
+var binaryExts = map[string]bool{
+	".7z":      true,
+	".a":       true,
+	".bin":     true,
+	".bmp":     true,
+	".bundle":  true,
+	".class":   true,
+	".dll":     true,
+	".dylib":   true,
+	".exe":     true,
+	".gif":     true,
+	".ico":     true,
+	".jar":     true,
+	".jpeg":    true,
+	".jpg":     true,
+	".lock":    true,
+	".mp3":     true,
+	".mp4":     true,
+	".o":       true,
+	".pdf":     true,
+	".png":     true,
+	".pyc":     true,
+	".rlib":    true,
+	".so":      true,
+	".sqlite":  true,
+	".sqlite3": true,
+	".wasm":    true,
+	".wav":     true,
+	".webp":    true,
+	".zip":     true,
+}
+
+var langByExt = map[string]string{
+	".bash":  "shell",
+	".c":     "c",
+	".cc":    "cpp",
+	".cljs":  "clojure",
+	".clj":   "clojure",
+	".cpp":   "cpp",
+	".cs":    "csharp",
+	".css":   "css",
+	".cxx":   "cpp",
+	".el":    "elisp",
+	".ex":    "elixir",
+	".exs":   "elixir",
+	".go":    "go",
+	".h":     "c",
+	".hpp":   "cpp",
+	".hs":    "haskell",
+	".html":  "html",
+	".java":  "java",
+	".js":    "javascript",
+	".jsx":   "javascript",
+	".kt":    "kotlin",
+	".kts":   "kotlin",
+	".lua":   "lua",
+	".mjs":   "javascript",
+	".php":   "php",
+	".py":    "python",
+	".rake":  "ruby",
+	".rb":    "ruby",
+	".rs":    "rust",
+	".scala": "scala",
+	".scm":   "scheme",
+	".sh":    "shell",
+	".swift": "swift",
+	".ts":    "typescript",
+	".tsx":   "typescript",
+	".vue":   "vue",
+	".zsh":   "shell",
+}
+
+var langByName = map[string]string{
+	"Brewfile":   "ruby",
+	"Dockerfile": "dockerfile",
+	"Gemfile":    "ruby",
+	"Justfile":   "make",
+	"Makefile":   "make",
+	"Rakefile":   "ruby",
+}
+
+type symbolSpec struct {
+	re   *regexp.Regexp
+	kind string
+}
+
+type symbol struct {
+	path      string
+	language  string
+	kind      string
+	name      string
+	line      int
+	column    int
+	signature string
+	context   string
+}
+
+var symbolPatterns = map[string][]symbolSpec{
+	"python": {
+		spec(`^\s*(?:async\s+)?def\s+([A-Za-z_]\w*)\s*\(`, "function"),
+		spec(`^\s*class\s+([A-Za-z_]\w*)\b`, "class"),
+	},
+	"ruby": {
+		spec(`^\s*def\s+((?:self\.)?[A-Za-z_]\w*[!?=]?)\b`, "method"),
+		spec(`^\s*class\s+([A-Za-z_:]\w*(?:::\w+)*)\b`, "class"),
+		spec(`^\s*module\s+([A-Za-z_:]\w*(?:::\w+)*)\b`, "module"),
+	},
+	"javascript": {
+		spec(`^\s*(?:export\s+)?(?:async\s+)?function\s+([$A-Za-z_][\w$]*)\s*\(`, "function"),
+		spec(`^\s*(?:export\s+)?(?:const|let|var)\s+([$A-Za-z_][\w$]*)\s*=\s*(?:async\s*)?(?:\([^)]*\)|[$A-Za-z_][\w$]*)\s*=>`, "function"),
+		spec(`^\s*(?:export\s+)?class\s+([$A-Za-z_][\w$]*)\b`, "class"),
+		spec(`^\s*(?:static\s+|async\s+|get\s+|set\s+)*([$A-Za-z_][\w$]*)\s*\([^)]*\)\s*\{?\s*$`, "method"),
+	},
+	"typescript": {
+		spec(`^\s*(?:export\s+)?(?:async\s+)?function\s+([$A-Za-z_][\w$]*)\s*\(`, "function"),
+		spec(`^\s*(?:export\s+)?(?:const|let|var)\s+([$A-Za-z_][\w$]*)\s*[:=].*=>`, "function"),
+		spec(`^\s*(?:export\s+)?(?:abstract\s+)?class\s+([$A-Za-z_][\w$]*)\b`, "class"),
+		spec(`^\s*(?:export\s+)?interface\s+([$A-Za-z_][\w$]*)\b`, "interface"),
+		spec(`^\s*(?:public\s+|private\s+|protected\s+|static\s+|async\s+|get\s+|set\s+)*([$A-Za-z_][\w$]*)\s*\([^)]*\)\s*[:{]`, "method"),
+	},
+	"go": {
+		spec(`^\s*func\s+(?:\([^)]*\)\s*)?([A-Za-z_]\w*)\s*\(`, "function"),
+		spec(`^\s*type\s+([A-Za-z_]\w*)\s+(?:struct|interface)\b`, "type"),
+	},
+	"rust": {
+		spec(`^\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+([A-Za-z_]\w*)\s*[<(]`, "function"),
+		spec(`^\s*(?:pub(?:\([^)]*\))?\s+)?struct\s+([A-Za-z_]\w*)\b`, "type"),
+		spec(`^\s*(?:pub(?:\([^)]*\))?\s+)?enum\s+([A-Za-z_]\w*)\b`, "enum"),
+		spec(`^\s*(?:pub(?:\([^)]*\))?\s+)?trait\s+([A-Za-z_]\w*)\b`, "trait"),
+	},
+	"java": {
+		spec(`^\s*(?:public|protected|private|abstract|final|static|\s)+class\s+([A-Za-z_]\w*)\b`, "class"),
+		spec(`^\s*(?:public|protected|private|static|final|synchronized|native|abstract|\s)+[\w<>\[\], ?]+\s+([A-Za-z_]\w*)\s*\([^;]*\)\s*\{?\s*$`, "method"),
+	},
+	"kotlin": {
+		spec(`^\s*(?:public|private|protected|internal|open|override|suspend|\s)*fun\s+([A-Za-z_]\w*)\s*\(`, "function"),
+		spec(`^\s*(?:data\s+|sealed\s+|open\s+)?class\s+([A-Za-z_]\w*)\b`, "class"),
+		spec(`^\s*interface\s+([A-Za-z_]\w*)\b`, "interface"),
+	},
+	"swift": {
+		spec(`^\s*(?:public|private|internal|open|static|class|mutating|\s)*func\s+([A-Za-z_]\w*)\s*\(`, "function"),
+		spec(`^\s*(?:public|private|internal|open|\s)*(?:class|struct|enum|protocol)\s+([A-Za-z_]\w*)\b`, "type"),
+	},
+	"csharp": {
+		spec(`^\s*(?:public|private|protected|internal|static|async|virtual|override|sealed|partial|\s)+class\s+([A-Za-z_]\w*)\b`, "class"),
+		spec(`^\s*(?:public|private|protected|internal|static|async|virtual|override|sealed|\s)+[\w<>\[\], ?]+\s+([A-Za-z_]\w*)\s*\([^;]*\)\s*\{?\s*$`, "method"),
+	},
+	"php": {
+		spec(`^\s*(?:public|protected|private|static|\s)*function\s+([A-Za-z_]\w*)\s*\(`, "function"),
+		spec(`^\s*(?:abstract\s+|final\s+)?class\s+([A-Za-z_]\w*)\b`, "class"),
+	},
+	"elixir": {
+		spec(`^\s*defmodule\s+([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\s+do\b`, "module"),
+		spec(`^\s*defp?\s+([A-Za-z_]\w*[!?]?)\b`, "function"),
+	},
+	"lua": {
+		spec(`^\s*(?:local\s+)?function\s+([A-Za-z_]\w*(?:[.:]\w+)*)\s*\(`, "function"),
+		spec(`^\s*([A-Za-z_]\w*(?:[.:]\w+)*)\s*=\s*function\s*\(`, "function"),
+	},
+	"shell": {
+		spec(`^\s*(?:function\s+)?([A-Za-z_][\w.-]*)\s*\(\)\s*\{?`, "function"),
+		spec(`^\s*function\s+([A-Za-z_][\w.-]*)\b`, "function"),
+	},
+	"elisp": {
+		spec(`^\s*\((?:cl-)?defun\s+([-A-Za-z0-9_+*/!?<>=]+)\b`, "function"),
+		spec(`^\s*\(defmacro\s+([-A-Za-z0-9_+*/!?<>=]+)\b`, "function"),
+		spec(`^\s*\(def(?:var|custom|const)\s+([-A-Za-z0-9_+*/!?<>=]+)\b`, "constant"),
+	},
+	"scheme": {
+		spec(`^\s*\(define\s+\(?([-A-Za-z0-9_+*/!?<>=]+)\b`, "function"),
+	},
+	"clojure": {
+		spec(`^\s*\(defn-?\s+([-A-Za-z0-9_+*/!?<>=]+)\b`, "function"),
+		spec(`^\s*\(def(?:macro|record|protocol|multi)?\s+([-A-Za-z0-9_+*/!?<>=]+)\b`, "constant"),
+	},
+	"c": {
+		spec(`^\s*(?:[A-Za-z_][\w\s*]+)\s+([A-Za-z_]\w*)\s*\([^;{}]*\)\s*(?:\{|$)`, "function"),
+	},
+	"cpp": {
+		spec(`^\s*(?:template\s*<[^>]+>\s*)?(?:[\w:<>,~*&\s]+)\s+([A-Za-z_~]\w*)\s*\([^;{}]*\)\s*(?:const\s*)?(?:noexcept\s*)?(?:->\s*[^{]+)?\s*(?:\{|$)`, "function"),
+		spec(`^\s*(?:class|struct)\s+([A-Za-z_]\w*)\b`, "type"),
+	},
+}
+
+var skipSymbolNames = map[string]bool{
+	"catch":  true,
+	"else":   true,
+	"for":    true,
+	"if":     true,
+	"switch": true,
+	"while":  true,
+	"with":   true,
+}
+
+func spec(pattern, kind string) symbolSpec {
+	return symbolSpec{re: regexp.MustCompile(pattern), kind: kind}
+}
+
+func main() {
+	if err := run(os.Args[1:]); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+
+func run(args []string) error {
+	if len(args) == 0 {
+		usage()
+		return errors.New("missing command")
+	}
+	switch args[0] {
+	case "path":
+		return cmdPath(args[1:])
+	case "build":
+		return cmdBuild(args[1:])
+	case "defs":
+		return cmdDefs(args[1:])
+	case "files":
+		return cmdFiles(args[1:])
+	case "sql":
+		return cmdSQL(args[1:])
+	case "show":
+		return cmdShow(args[1:])
+	case "stats":
+		return cmdStats(args[1:])
+	default:
+		usage()
+		return fmt.Errorf("unknown command: %s", args[0])
+	}
+}
+
+func usage() {
+	fmt.Fprintln(os.Stderr, "usage: code-index <path|build|defs|files|sql|show|stats> [options]")
+}
+
+func cmdPath(args []string) error {
+	if len(args) != 1 {
+		return errors.New("usage: code-index path ROOT")
+	}
+	root, err := filepath.Abs(args[0])
+	if err != nil {
+		return err
+	}
+	fmt.Println(defaultDBPath(root))
+	return nil
+}
+
+func cmdBuild(args []string) error {
+	flags := flag.NewFlagSet("build", flag.ExitOnError)
+	dbPath := flags.String("db", "", "database path")
+	maxBytes := flags.Int64("max-bytes", 1_000_000, "skip files larger than this")
+	var extraIgnored repeatedFlag
+	flags.Var(&extraIgnored, "ignore-dir", "extra directory name to ignore")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 1 {
+		return errors.New("usage: code-index build [--db DB] [--max-bytes N] ROOT")
+	}
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		return errors.New("sqlite3 command not found")
+	}
+	root, err := filepath.Abs(flags.Arg(0))
+	if err != nil {
+		return err
+	}
+	info, err := os.Stat(root)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("not a directory: %s", root)
+	}
+	db := *dbPath
+	if db == "" {
+		db = defaultDBPath(root)
+	}
+	if err := os.MkdirAll(filepath.Dir(db), 0o755); err != nil {
+		return err
+	}
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		if err := os.Remove(db + suffix); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	fts := hasFTS5()
+	writer, wait, err := sqliteWriter(db)
+	if err != nil {
+		return err
+	}
+	ok := false
+	defer func() {
+		if !ok {
+			_ = writer.Close()
+			_ = wait()
+		}
+	}()
+	writeSchema(writer, fts)
+	writeSQL(writer, "insert into meta(key, value) values(%s, %s);\n", quote("root"), quote(root))
+	writeSQL(writer, "insert into meta(key, value) values(%s, %s);\n", quote("fts5"), quote(boolText(fts)))
+	ignored := cloneIgnored(extraIgnored)
+	var fileCount, symbolCount, lineCount int
+	nextFileID := 1
+	nextSymbolID := 1
+	err = walkSourceFiles(root, ignored, *maxBytes, func(path string, info fs.FileInfo) error {
+		text, err := readText(path, *maxBytes)
+		if err != nil {
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+		language := detectLanguage(path)
+		lines := splitLines(text)
+		sha := sha1Hex(text)
+		writeSQL(
+			writer,
+			"insert into files(id, path, language, extension, size, mtime, sha1) values(%d, %s, %s, %s, %d, %d, %s);\n",
+			nextFileID,
+			quote(rel),
+			nullableQuote(language),
+			quote(strings.ToLower(filepath.Ext(path))),
+			info.Size(),
+			info.ModTime().Unix(),
+			quote(sha),
+		)
+		for index, line := range lines {
+			writeSQL(writer, "insert into lines(file_id, line, text) values(%d, %d, %s);\n", nextFileID, index+1, quote(line))
+		}
+		symbols := extractSymbols(rel, language, lines)
+		for _, sym := range symbols {
+			writeSQL(
+				writer,
+				"insert into symbols(id, file_id, path, language, kind, name, line, column, signature, context) values(%d, %d, %s, %s, %s, %s, %d, %d, %s, %s);\n",
+				nextSymbolID,
+				nextFileID,
+				quote(sym.path),
+				nullableQuote(sym.language),
+				quote(sym.kind),
+				quote(sym.name),
+				sym.line,
+				sym.column,
+				quote(sym.signature),
+				quote(sym.context),
+			)
+			if fts {
+				writeSQL(
+					writer,
+					"insert into symbols_fts(name, kind, language, path, signature, context) values(%s, %s, %s, %s, %s, %s);\n",
+					quote(sym.name),
+					quote(sym.kind),
+					nullableQuote(sym.language),
+					quote(sym.path),
+					quote(sym.signature),
+					quote(sym.context),
+				)
+			}
+			nextSymbolID++
+		}
+		if fts {
+			writeSQL(writer, "insert into files_fts(path, language, content) values(%s, %s, %s);\n", quote(rel), nullableQuote(language), quote(text))
+		}
+		fileCount++
+		symbolCount += len(symbols)
+		lineCount += len(lines)
+		nextFileID++
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	writeSQL(writer, "commit;\n")
+	if err := writer.Close(); err != nil {
+		return err
+	}
+	if err := wait(); err != nil {
+		return err
+	}
+	ok = true
+	fmt.Printf("db: %s\n", db)
+	fmt.Printf("root: %s\n", root)
+	fmt.Printf("files: %d\n", fileCount)
+	fmt.Printf("symbols: %d\n", symbolCount)
+	fmt.Printf("lines: %d\n", lineCount)
+	fmt.Printf("fts5: %s\n", yesNo(fts))
+	return nil
+}
+
+func cmdDefs(args []string) error {
+	fs := flag.NewFlagSet("defs", flag.ExitOnError)
+	root := fs.String("root", "", "repository root for default database path")
+	db := fs.String("db", "", "database path")
+	kind := fs.String("kind", "", "symbol kind filter")
+	language := fs.String("language", "", "language filter")
+	limit := fs.Int("limit", 50, "maximum rows")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return errors.New("usage: code-index defs [--root ROOT|--db DB] [--kind KIND] [--language LANG] QUERY")
+	}
+	query := fs.Arg(0)
+	where := "(name = " + quote(query) + " collate nocase or name like " + quote(query+"%") + " collate nocase or signature like " + quote("%"+query+"%") + " collate nocase or path like " + quote("%"+query+"%") + " collate nocase)"
+	if *kind != "" {
+		where += " and kind = " + quote(*kind)
+	}
+	if *language != "" {
+		where += " and language = " + quote(*language)
+	}
+	sql := fmt.Sprintf(`select path, line, kind, name, language, signature
+from symbols
+where %s
+order by
+  case
+    when name = %s collate nocase then 0
+    when name like %s collate nocase then 1
+    else 2
+  end,
+  path,
+  line
+limit %d;`, where, quote(query), quote(query+"%"), *limit)
+	return runSQLitePrint(requiredDB(*db, *root), sql)
+}
+
+func cmdFiles(args []string) error {
+	fs := flag.NewFlagSet("files", flag.ExitOnError)
+	root := fs.String("root", "", "repository root for default database path")
+	db := fs.String("db", "", "database path")
+	language := fs.String("language", "", "language filter")
+	limit := fs.Int("limit", 100, "maximum rows")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return errors.New("usage: code-index files [--root ROOT|--db DB] [--language LANG] QUERY")
+	}
+	query := fs.Arg(0)
+	where := "path like " + quote("%"+query+"%") + " collate nocase"
+	if *language != "" {
+		where += " and language = " + quote(*language)
+	}
+	sql := fmt.Sprintf(`select path, language, size
+from files
+where %s
+order by path
+limit %d;`, where, *limit)
+	return runSQLitePrint(requiredDB(*db, *root), sql)
+}
+
+func cmdSQL(args []string) error {
+	fs := flag.NewFlagSet("sql", flag.ExitOnError)
+	root := fs.String("root", "", "repository root for default database path")
+	db := fs.String("db", "", "database path")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	var query string
+	if fs.NArg() == 0 {
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return err
+		}
+		query = string(data)
+	} else if fs.NArg() == 1 {
+		query = fs.Arg(0)
+	} else {
+		return errors.New("usage: code-index sql [--root ROOT|--db DB] [SQL]")
+	}
+	if err := validateReadOnlySQL(query); err != nil {
+		return err
+	}
+	return runSQLitePrint(requiredDB(*db, *root), query)
+}
+
+func cmdShow(args []string) error {
+	fs := flag.NewFlagSet("show", flag.ExitOnError)
+	root := fs.String("root", "", "repository root for default database path")
+	db := fs.String("db", "", "database path")
+	line := fs.Int("line", 0, "1-based line number")
+	context := fs.Int("context", 3, "context lines")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 || *line <= 0 {
+		return errors.New("usage: code-index show [--root ROOT|--db DB] --line N [--context N] PATH")
+	}
+	path := strings.TrimPrefix(filepath.ToSlash(fs.Arg(0)), "/")
+	start := *line - *context
+	if start < 1 {
+		start = 1
+	}
+	end := *line + *context
+	sql := fmt.Sprintf(`with target as (
+  select id, path
+  from files
+  where path = %s or path like %s
+  order by case when path = %s then 0 else 1 end, length(path)
+  limit 1
+)
+select target.path as path, lines.line as line, lines.text as text
+from lines join target on target.id = lines.file_id
+where lines.line between %d and %d
+order by lines.line;`, quote(path), quote("%"+path), quote(path), start, end)
+	return runSQLitePrint(requiredDB(*db, *root), sql)
+}
+
+func cmdStats(args []string) error {
+	fs := flag.NewFlagSet("stats", flag.ExitOnError)
+	root := fs.String("root", "", "repository root for default database path")
+	db := fs.String("db", "", "database path")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	sql := `select 'root' as key, value from meta where key = 'root'
+union all select 'files', cast(count(*) as text) from files
+union all select 'symbols', cast(count(*) as text) from symbols
+union all select 'lines', cast(count(*) as text) from lines
+union all select 'fts5', value from meta where key = 'fts5';`
+	return runSQLitePrint(requiredDB(*db, *root), sql)
+}
+
+type repeatedFlag []string
+
+func (r *repeatedFlag) String() string {
+	return strings.Join(*r, ",")
+}
+
+func (r *repeatedFlag) Set(value string) error {
+	*r = append(*r, value)
+	return nil
+}
+
+func defaultDBPath(root string) string {
+	sum := sha1.Sum([]byte(root))
+	return filepath.Join(os.TempDir(), "code-sql-search", hex.EncodeToString(sum[:])[:16]+".sqlite")
+}
+
+func requiredDB(db, root string) string {
+	if db != "" {
+		return db
+	}
+	if root == "" {
+		root = "."
+	}
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return defaultDBPath(root)
+	}
+	return defaultDBPath(abs)
+}
+
+func hasFTS5() bool {
+	cmd := exec.Command("sqlite3", ":memory:", "create virtual table t using fts5(x);")
+	return cmd.Run() == nil
+}
+
+func sqliteWriter(db string) (io.WriteCloser, func() error, error) {
+	cmd := exec.Command("sqlite3", "-batch", db)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, nil, err
+	}
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		return nil, nil, err
+	}
+	return stdin, cmd.Wait, nil
+}
+
+func writeSchema(w io.Writer, fts bool) {
+	writeSQL(w, ".bail on\n")
+	writeSQL(w, "begin;\n")
+	writeSQL(w, `create table meta (
+  key text primary key,
+  value text not null
+);
+create table files (
+  id integer primary key,
+  path text not null unique,
+  language text,
+  extension text,
+  size integer not null,
+  mtime integer not null,
+  sha1 text not null
+);
+create table symbols (
+  id integer primary key,
+  file_id integer not null references files(id) on delete cascade,
+  path text not null,
+  language text,
+  kind text not null,
+  name text not null,
+  line integer not null,
+  column integer not null,
+  signature text not null,
+  context text not null
+);
+create table lines (
+  file_id integer not null references files(id) on delete cascade,
+  line integer not null,
+  text text not null,
+  primary key (file_id, line)
+);
+create index idx_files_path on files(path);
+create index idx_files_language on files(language);
+create index idx_symbols_name on symbols(name);
+create index idx_symbols_path_line on symbols(path, line);
+create index idx_symbols_language_kind on symbols(language, kind);
+`)
+	if fts {
+		writeSQL(w, "create virtual table files_fts using fts5(path, language, content);\n")
+		writeSQL(w, "create virtual table symbols_fts using fts5(name, kind, language, path, signature, context);\n")
+	}
+}
+
+func runSQLitePrint(db, sql string) error {
+	if _, err := os.Stat(db); err != nil {
+		return fmt.Errorf("index not found: %s; run build first, or pass --db", db)
+	}
+	cmd := exec.Command("sqlite3", "-batch", db)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return err
+	}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	_, _ = io.WriteString(stdin, ".headers on\n.mode tabs\n")
+	_, _ = io.WriteString(stdin, sql)
+	if !strings.HasSuffix(strings.TrimSpace(sql), ";") {
+		_, _ = io.WriteString(stdin, ";\n")
+	}
+	if err := stdin.Close(); err != nil {
+		return err
+	}
+	return cmd.Wait()
+}
+
+func validateReadOnlySQL(query string) error {
+	trimmed := strings.TrimSpace(query)
+	lower := strings.ToLower(trimmed)
+	if !(strings.HasPrefix(lower, "select") || strings.HasPrefix(lower, "with") || strings.HasPrefix(lower, "pragma")) {
+		return errors.New("only read-only SELECT, WITH, or PRAGMA statements are allowed")
+	}
+	stripped := strings.TrimRight(trimmed, ";\n\t ")
+	if strings.Contains(stripped, ";") {
+		return errors.New("only one SQL statement is allowed")
+	}
+	blocked := regexp.MustCompile(`(?i)\b(insert|update|delete|drop|alter|create|replace|vacuum|attach|detach)\b`)
+	if blocked.MatchString(query) {
+		return errors.New("mutating SQL is not allowed")
+	}
+	return nil
+}
+
+func walkSourceFiles(root string, ignored map[string]bool, maxBytes int64, fn func(path string, info fs.FileInfo) error) error {
+	return filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		name := d.Name()
+		if d.IsDir() {
+			if path != root && ignored[name] {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if binaryExts[strings.ToLower(filepath.Ext(path))] {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil || info.Size() > maxBytes {
+			return nil
+		}
+		return fn(path, info)
+	})
+}
+
+func readText(path string, maxBytes int64) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	if int64(len(data)) > maxBytes || bytesContainNUL(data) {
+		return "", errors.New("not text")
+	}
+	if !utf8.Valid(data) {
+		return strings.ToValidUTF8(string(data), "?"), nil
+	}
+	return string(data), nil
+}
+
+func bytesContainNUL(data []byte) bool {
+	limit := len(data)
+	if limit > 8192 {
+		limit = 8192
+	}
+	for _, b := range data[:limit] {
+		if b == 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func detectLanguage(path string) string {
+	base := filepath.Base(path)
+	if lang, ok := langByName[base]; ok {
+		return lang
+	}
+	return langByExt[strings.ToLower(filepath.Ext(path))]
+}
+
+func splitLines(text string) []string {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+	if text == "" {
+		return nil
+	}
+	lines := strings.Split(text, "\n")
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return lines
+}
+
+func extractSymbols(path, language string, lines []string) []symbol {
+	patterns := symbolPatterns[language]
+	if len(patterns) == 0 {
+		return nil
+	}
+	var out []symbol
+	seen := map[string]bool{}
+	for i, line := range lines {
+		for _, pattern := range patterns {
+			match := pattern.re.FindStringSubmatchIndex(line)
+			if match == nil || len(match) < 4 {
+				continue
+			}
+			name := line[match[2]:match[3]]
+			if skipSymbolNames[name] {
+				continue
+			}
+			key := name + ":" + strconv.Itoa(i+1) + ":" + pattern.kind
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			start := i - 2
+			if start < 0 {
+				start = 0
+			}
+			end := i + 3
+			if end > len(lines) {
+				end = len(lines)
+			}
+			out = append(out, symbol{
+				path:      path,
+				language:  language,
+				kind:      pattern.kind,
+				name:      name,
+				line:      i + 1,
+				column:    match[2] + 1,
+				signature: truncate(strings.TrimSpace(line), 500),
+				context:   truncate(strings.Join(lines[start:end], "\n"), 2000),
+			})
+			break
+		}
+	}
+	return out
+}
+
+func sha1Hex(text string) string {
+	sum := sha1.Sum([]byte(text))
+	return hex.EncodeToString(sum[:])
+}
+
+func quote(s string) string {
+	s = strings.ReplaceAll(s, "\x00", "")
+	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
+}
+
+func nullableQuote(s string) string {
+	if s == "" {
+		return "null"
+	}
+	return quote(s)
+}
+
+func writeSQL(w io.Writer, format string, args ...interface{}) {
+	_, _ = fmt.Fprintf(w, format, args...)
+}
+
+func truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max]
+}
+
+func boolText(v bool) string {
+	if v {
+		return "1"
+	}
+	return "0"
+}
+
+func yesNo(v bool) string {
+	if v {
+		return "yes"
+	}
+	return "no"
+}
+
+func cloneIgnored(extra []string) map[string]bool {
+	out := make(map[string]bool, len(ignoredDirs)+len(extra))
+	for name, value := range ignoredDirs {
+		out[name] = value
+	}
+	for _, name := range extra {
+		if name != "" {
+			out[name] = true
+		}
+	}
+	keys := make([]string, 0, len(out))
+	for key := range out {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return out
+}

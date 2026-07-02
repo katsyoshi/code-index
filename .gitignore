@@ -1,0 +1,7 @@
+/code-index
+*.sqlite
+*.sqlite3
+*.db
+*.db-shm
+*.db-wal
+dist/

@@ -1,0 +1,63 @@
+# code-sql-search
+
+`code-sql-search` builds a local SQLite index for source-code navigation. It is intended for LLM and agent workflows that should query code structure through SQL instead of repeatedly using grep-style text search.
+
+The binary is written in Go and uses the `sqlite3` command for database creation and queries. The built binary does not require a Go runtime.
+
+## Build
+
+```sh
+go build -o code-index .
+```
+
+## Usage
+
+Build or refresh an index:
+
+```sh
+./code-index build /path/to/repo
+```
+
+Find symbol definitions:
+
+```sh
+./code-index defs --root /path/to/repo parse_config
+```
+
+Find files:
+
+```sh
+./code-index files --root /path/to/repo config
+```
+
+Run read-only SQL:
+
+```sh
+./code-index sql --root /path/to/repo \
+  "select path, line, kind, name, signature from symbols where name like '%parse%' order by path, line limit 50"
+```
+
+Show indexed source around a line:
+
+```sh
+./code-index show --root /path/to/repo --line 42 lib/config.rb
+```
+
+The default database is stored under `/tmp/code-sql-search/` and keyed by the absolute repository path. Use `--db` to provide an explicit database path.
+
+## Schema
+
+Main tables:
+
+- `files`: repository-relative paths and file metadata
+- `symbols`: regex-extracted definitions such as functions, methods, classes, modules, interfaces, traits, and types
+- `lines`: indexed source lines
+- `files_fts` and `symbols_fts`: FTS5 tables when the installed `sqlite3` supports FTS5
+
+## Notes
+
+This is a lightweight regex-based index, not a language server. Treat matches as navigation candidates and inspect source before making behavioral claims.
+
+## License
+
+MIT
