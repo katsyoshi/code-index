@@ -50,7 +50,7 @@ Show indexed code metrics:
 ./code-index metrics --root /path/to/repo lib/config
 ```
 
-The default database is stored under `/tmp/code-index/` and keyed by the absolute repository path. Use `--db` to provide an explicit database path.
+The default database is stored under `CODE_INDEX_CACHE_DIR` when set. Otherwise it uses `$XDG_CACHE_HOME/code-index` or `~/.cache/code-index`, keyed by the absolute repository path. Use `--db` to provide an explicit database path.
 
 ## Schema
 

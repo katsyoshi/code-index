@@ -666,7 +666,20 @@ func (r *repeatedFlag) Set(value string) error {
 
 func defaultDBPath(root string) string {
 	sum := sha1.Sum([]byte(root))
-	return filepath.Join(os.TempDir(), "code-index", hex.EncodeToString(sum[:])[:16]+".sqlite")
+	return filepath.Join(defaultCacheDir(), hex.EncodeToString(sum[:])[:16]+".sqlite")
+}
+
+func defaultCacheDir() string {
+	if dir := os.Getenv("CODE_INDEX_CACHE_DIR"); dir != "" {
+		return dir
+	}
+	if dir := os.Getenv("XDG_CACHE_HOME"); dir != "" {
+		return filepath.Join(dir, "code-index")
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		return filepath.Join(home, ".cache", "code-index")
+	}
+	return filepath.Join(os.TempDir(), "code-index")
 }
 
 func requiredDB(db, root string) string {
