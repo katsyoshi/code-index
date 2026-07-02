@@ -146,6 +146,14 @@ type symbol struct {
 	context   string
 }
 
+type fileMetrics struct {
+	lineCount    int
+	blankLines   int
+	commentLines int
+	codeLines    int
+	symbolCount  int
+}
+
 var symbolPatterns = map[string][]symbolSpec{
 	"python": {
 		spec(`^\s*(?:async\s+)?def\s+([A-Za-z_]\w*)\s*\(`, "function"),
@@ -274,6 +282,8 @@ func run(args []string) error {
 		return cmdShow(args[1:])
 	case "stats":
 		return cmdStats(args[1:])
+	case "metrics":
+		return cmdMetrics(args[1:])
 	default:
 		usage()
 		return fmt.Errorf("unknown command: %s", args[0])
@@ -281,7 +291,7 @@ func run(args []string) error {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: code-index <path|build|defs|files|sql|show|stats> [options]")
+	fmt.Fprintln(os.Stderr, "usage: code-index <path|build|defs|files|sql|show|stats|metrics> [options]")
 }
 
 func cmdPath(args []string) error {
@@ -351,6 +361,7 @@ func cmdBuild(args []string) error {
 	writeSQL(writer, "insert into meta(key, value) values(%s, %s);\n", quote("fts5"), quote(boolText(fts)))
 	ignored := cloneIgnored(extraIgnored)
 	var fileCount, symbolCount, lineCount int
+	var codeLineCount, commentLineCount, blankLineCount int
 	nextFileID := 1
 	nextSymbolID := 1
 	err = walkSourceFiles(root, ignored, *maxBytes, func(path string, info fs.FileInfo) error {
@@ -381,6 +392,19 @@ func cmdBuild(args []string) error {
 			writeSQL(writer, "insert into lines(file_id, line, text) values(%d, %d, %s);\n", nextFileID, index+1, quote(line))
 		}
 		symbols := extractSymbols(rel, language, lines)
+		metrics := computeFileMetrics(language, lines, len(symbols))
+		writeSQL(
+			writer,
+			"insert into file_metrics(file_id, path, language, line_count, blank_lines, comment_lines, code_lines, symbol_count) values(%d, %s, %s, %d, %d, %d, %d, %d);\n",
+			nextFileID,
+			quote(rel),
+			nullableQuote(language),
+			metrics.lineCount,
+			metrics.blankLines,
+			metrics.commentLines,
+			metrics.codeLines,
+			metrics.symbolCount,
+		)
 		for _, sym := range symbols {
 			writeSQL(
 				writer,
@@ -416,6 +440,9 @@ func cmdBuild(args []string) error {
 		fileCount++
 		symbolCount += len(symbols)
 		lineCount += len(lines)
+		codeLineCount += metrics.codeLines
+		commentLineCount += metrics.commentLines
+		blankLineCount += metrics.blankLines
 		nextFileID++
 		return nil
 	})
@@ -435,6 +462,9 @@ func cmdBuild(args []string) error {
 	fmt.Printf("files: %d\n", fileCount)
 	fmt.Printf("symbols: %d\n", symbolCount)
 	fmt.Printf("lines: %d\n", lineCount)
+	fmt.Printf("code_lines: %d\n", codeLineCount)
+	fmt.Printf("comment_lines: %d\n", commentLineCount)
+	fmt.Printf("blank_lines: %d\n", blankLineCount)
 	fmt.Printf("fts5: %s\n", yesNo(fts))
 	return nil
 }
@@ -568,7 +598,58 @@ func cmdStats(args []string) error {
 union all select 'files', cast(count(*) as text) from files
 union all select 'symbols', cast(count(*) as text) from symbols
 union all select 'lines', cast(count(*) as text) from lines
+union all select 'code_lines', cast(coalesce(sum(code_lines), 0) as text) from file_metrics
+union all select 'comment_lines', cast(coalesce(sum(comment_lines), 0) as text) from file_metrics
+union all select 'blank_lines', cast(coalesce(sum(blank_lines), 0) as text) from file_metrics
 union all select 'fts5', value from meta where key = 'fts5';`
+	return runSQLitePrint(requiredDB(*db, *root), sql)
+}
+
+func cmdMetrics(args []string) error {
+	fs := flag.NewFlagSet("metrics", flag.ExitOnError)
+	root := fs.String("root", "", "repository root for default database path")
+	db := fs.String("db", "", "database path")
+	language := fs.String("language", "", "language filter")
+	limit := fs.Int("limit", 100, "maximum rows")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() > 1 {
+		return errors.New("usage: code-index metrics [--root ROOT|--db DB] [--language LANG] [--limit N] [PATH_QUERY]")
+	}
+	where := "1 = 1"
+	if *language != "" {
+		where += " and language = " + quote(*language)
+	}
+	var sql string
+	if fs.NArg() == 0 {
+		sql = fmt.Sprintf(`select coalesce(language, '(unknown)') as language,
+       count(*) as files,
+       sum(line_count) as lines,
+       sum(code_lines) as code,
+       sum(comment_lines) as comments,
+       sum(blank_lines) as blank,
+       sum(symbol_count) as symbols
+from file_metrics
+where %s
+group by coalesce(language, '(unknown)')
+order by lines desc, language
+limit %d;`, where, *limit)
+	} else {
+		query := fs.Arg(0)
+		where += " and path like " + quote("%"+query+"%") + " collate nocase"
+		sql = fmt.Sprintf(`select path,
+       language,
+       line_count as lines,
+       code_lines as code,
+       comment_lines as comments,
+       blank_lines as blank,
+       symbol_count as symbols
+from file_metrics
+where %s
+order by path
+limit %d;`, where, *limit)
+	}
 	return runSQLitePrint(requiredDB(*db, *root), sql)
 }
 
@@ -585,7 +666,7 @@ func (r *repeatedFlag) Set(value string) error {
 
 func defaultDBPath(root string) string {
 	sum := sha1.Sum([]byte(root))
-	return filepath.Join(os.TempDir(), "code-sql-search", hex.EncodeToString(sum[:])[:16]+".sqlite")
+	return filepath.Join(os.TempDir(), "code-index", hex.EncodeToString(sum[:])[:16]+".sqlite")
 }
 
 func requiredDB(db, root string) string {
@@ -655,11 +736,23 @@ create table lines (
   text text not null,
   primary key (file_id, line)
 );
+create table file_metrics (
+  file_id integer primary key references files(id) on delete cascade,
+  path text not null unique,
+  language text,
+  line_count integer not null,
+  blank_lines integer not null,
+  comment_lines integer not null,
+  code_lines integer not null,
+  symbol_count integer not null
+);
 create index idx_files_path on files(path);
 create index idx_files_language on files(language);
 create index idx_symbols_name on symbols(name);
 create index idx_symbols_path_line on symbols(path, line);
 create index idx_symbols_language_kind on symbols(language, kind);
+create index idx_file_metrics_path on file_metrics(path);
+create index idx_file_metrics_language on file_metrics(language);
 `)
 	if fts {
 		writeSQL(w, "create virtual table files_fts using fts5(path, language, content);\n")
@@ -778,6 +871,90 @@ func splitLines(text string) []string {
 		lines = lines[:len(lines)-1]
 	}
 	return lines
+}
+
+func computeFileMetrics(language string, lines []string, symbolCount int) fileMetrics {
+	metrics := fileMetrics{
+		lineCount:   len(lines),
+		symbolCount: symbolCount,
+	}
+	var blockEnd string
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			metrics.blankLines++
+			continue
+		}
+		if isCommentOnlyLine(language, trimmed, &blockEnd) {
+			metrics.commentLines++
+			continue
+		}
+		metrics.codeLines++
+	}
+	return metrics
+}
+
+func isCommentOnlyLine(language, trimmed string, blockEnd *string) bool {
+	if *blockEnd != "" {
+		if strings.Contains(trimmed, *blockEnd) {
+			*blockEnd = ""
+		}
+		return true
+	}
+
+	if start, end, ok := blockCommentDelimiters(language); ok && strings.HasPrefix(trimmed, start) {
+		if !strings.Contains(trimmed[len(start):], end) {
+			*blockEnd = end
+		}
+		return true
+	}
+
+	for _, prefix := range lineCommentPrefixes(language) {
+		if strings.HasPrefix(trimmed, prefix) {
+			return true
+		}
+	}
+
+	if start, end, ok := blockCommentDelimiters(language); ok {
+		if index := strings.Index(trimmed, start); index >= 0 && !strings.Contains(trimmed[index+len(start):], end) {
+			*blockEnd = end
+		}
+	}
+	return false
+}
+
+func lineCommentPrefixes(language string) []string {
+	switch language {
+	case "clojure", "elisp", "scheme":
+		return []string{";"}
+	case "haskell", "lua":
+		return []string{"--"}
+	case "c", "cpp", "csharp", "go", "java", "javascript", "kotlin", "rust", "scala", "swift", "typescript":
+		return []string{"//"}
+	case "php":
+		return []string{"//", "#"}
+	case "dockerfile", "elixir", "make", "python", "ruby", "shell":
+		return []string{"#"}
+	default:
+		return nil
+	}
+}
+
+func blockCommentDelimiters(language string) (string, string, bool) {
+	switch language {
+	case "c", "cpp", "csharp", "css", "go", "java", "javascript", "kotlin", "php", "rust", "scala", "swift", "typescript":
+		return "/*", "*/", true
+	case "haskell":
+		return "{-", "-}", true
+	case "html", "vue":
+		return "<!--", "-->", true
+	case "lua":
+		return "--[[", "]]", true
+	case "ruby":
+		return "=begin", "=end", true
+	default:
+		return "", "", false
+	}
 }
 
 func extractSymbols(path, language string, lines []string) []symbol {

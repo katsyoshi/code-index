@@ -1,6 +1,6 @@
-# code-sql-search
+# code-index
 
-`code-sql-search` builds a local SQLite index for source-code navigation. It is intended for LLM and agent workflows that should query code structure through SQL instead of repeatedly using grep-style text search.
+`code-index` builds a local SQLite index for source-code navigation. It is intended for LLM and agent workflows that should query code structure through SQL instead of repeatedly using grep-style text search.
 
 The binary is written in Go and uses the `sqlite3` command for database creation and queries. The built binary does not require a Go runtime.
 
@@ -43,7 +43,14 @@ Show indexed source around a line:
 ./code-index show --root /path/to/repo --line 42 lib/config.rb
 ```
 
-The default database is stored under `/tmp/code-sql-search/` and keyed by the absolute repository path. Use `--db` to provide an explicit database path.
+Show indexed code metrics:
+
+```sh
+./code-index metrics --root /path/to/repo
+./code-index metrics --root /path/to/repo lib/config
+```
+
+The default database is stored under `/tmp/code-index/` and keyed by the absolute repository path. Use `--db` to provide an explicit database path.
 
 ## Schema
 
@@ -52,6 +59,7 @@ Main tables:
 - `files`: repository-relative paths and file metadata
 - `symbols`: regex-extracted definitions such as functions, methods, classes, modules, interfaces, traits, and types
 - `lines`: indexed source lines
+- `file_metrics`: per-file line, blank line, comment line, code line, and symbol counts
 - `files_fts` and `symbols_fts`: FTS5 tables when the installed `sqlite3` supports FTS5
 
 ## Notes
