@@ -6,6 +6,17 @@ It is not intended to replace language servers, VCS indexes, or full code-intell
 
 The binary is written in Go and uses the `sqlite3` command for database creation and queries. The built binary does not require a Go runtime.
 
+The Codex skill source lives at `skills/code-index/SKILL.md`. It prefers an external `code-index` binary on `PATH` and keeps bundled skill copies as a fallback.
+
+For local Codex development, keep the checked-in skill as the source of truth and symlink it into your Codex skills directory:
+
+```sh
+mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
+ln -s "$PWD/skills/code-index" "${CODEX_HOME:-$HOME/.codex}/skills/code-index"
+```
+
+If the target already exists, remove or rename it first.
+
 ## Build
 
 ```sh

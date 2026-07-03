@@ -1,0 +1,4 @@
+interface:
+  display_name: "Code Index"
+  short_description: "Search code through a local SQLite index"
+  default_prompt: "Use $code-index to index this codebase and navigate files, symbols, metrics, and source lines."
