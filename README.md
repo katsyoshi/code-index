@@ -14,10 +14,18 @@ go build -o code-index .
 
 ## Usage
 
-Build or refresh an index:
+Initialize an empty index database:
 
 ```sh
-./code-index build /path/to/repo
+./code-index init /path/to/repo
+```
+
+`init` creates the schema and metadata only. It fails if the index database already exists.
+
+Rebuild an index atomically:
+
+```sh
+./code-index rebuild /path/to/repo
 ```
 
 Find symbol definitions:
@@ -70,7 +78,7 @@ root="$(git rev-parse --show-toplevel)" || exit 0
 command -v code-index >/dev/null 2>&1 || exit 0
 
 (
-  code-index build "$root" >/dev/null 2>&1
+  code-index rebuild "$root" >/dev/null 2>&1
 ) &
 EOF
 chmod +x .git/hooks/post-checkout
@@ -85,13 +93,13 @@ root="$(git rev-parse --show-toplevel)" || exit 0
 command -v code-index >/dev/null 2>&1 || exit 0
 
 (
-  code-index build "$root" >/dev/null 2>&1
+  code-index rebuild "$root" >/dev/null 2>&1
 ) &
 EOF
 chmod +x .git/hooks/post-merge
 ```
 
-The examples run in the background so Git commands do not wait for indexing. If a query runs while the hook is rebuilding the database, retry the query after the rebuild finishes.
+The examples run in the background so Git commands do not wait for indexing. Queries keep using the previous index until the rebuild finishes and replaces it.
 
 ## Schema
 

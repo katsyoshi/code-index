@@ -270,8 +270,10 @@ func run(args []string) error {
 	switch args[0] {
 	case "path":
 		return cmdPath(args[1:])
-	case "build":
-		return cmdBuild(args[1:])
+	case "init":
+		return cmdInit(args[1:])
+	case "rebuild":
+		return cmdRebuild(args[1:])
 	case "defs":
 		return cmdDefs(args[1:])
 	case "files":
@@ -291,7 +293,7 @@ func run(args []string) error {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: code-index <path|build|defs|files|sql|show|stats|metrics> [options]")
+	fmt.Fprintln(os.Stderr, "usage: code-index <path|init|rebuild|defs|files|sql|show|stats|metrics> [options]")
 }
 
 func cmdPath(args []string) error {
@@ -306,8 +308,96 @@ func cmdPath(args []string) error {
 	return nil
 }
 
-func cmdBuild(args []string) error {
-	flags := flag.NewFlagSet("build", flag.ExitOnError)
+func cmdInit(args []string) error {
+	flags := flag.NewFlagSet("init", flag.ExitOnError)
+	dbPath := flags.String("db", "", "database path")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 1 {
+		return errors.New("usage: code-index init [--db DB] ROOT")
+	}
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		return errors.New("sqlite3 command not found")
+	}
+	root, err := filepath.Abs(flags.Arg(0))
+	if err != nil {
+		return err
+	}
+	info, err := os.Stat(root)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("not a directory: %s", root)
+	}
+	db := *dbPath
+	if db == "" {
+		db = defaultDBPath(root)
+	}
+	if _, err := os.Stat(db); err == nil {
+		return fmt.Errorf("index already exists: %s; run rebuild to replace it", db)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(db), 0o755); err != nil {
+		return err
+	}
+	tmpDB, err := createTempDBPath(db)
+	if err != nil {
+		return err
+	}
+	installed := false
+	defer func() {
+		if !installed {
+			_ = removeDBFiles(tmpDB)
+		}
+	}()
+	fts := hasFTS5()
+	writer, wait, err := sqliteWriter(tmpDB)
+	if err != nil {
+		return err
+	}
+	writerOK := false
+	defer func() {
+		if !writerOK {
+			_ = writer.Close()
+			_ = wait()
+		}
+	}()
+	writeSchema(writer, fts)
+	writeSQL(writer, "insert into meta(key, value) values(%s, %s);\n", quote("root"), quote(root))
+	writeSQL(writer, "insert into meta(key, value) values(%s, %s);\n", quote("fts5"), quote(boolText(fts)))
+	writeSQL(writer, "commit;\n")
+	if err := writer.Close(); err != nil {
+		return err
+	}
+	if err := wait(); err != nil {
+		return err
+	}
+	writerOK = true
+	if err := installBuiltDB(tmpDB, db); err != nil {
+		return err
+	}
+	installed = true
+	fmt.Printf("db: %s\n", db)
+	fmt.Printf("root: %s\n", root)
+	fmt.Printf("files: 0\n")
+	fmt.Printf("symbols: 0\n")
+	fmt.Printf("lines: 0\n")
+	fmt.Printf("code_lines: 0\n")
+	fmt.Printf("comment_lines: 0\n")
+	fmt.Printf("blank_lines: 0\n")
+	fmt.Printf("fts5: %s\n", yesNo(fts))
+	return nil
+}
+
+func cmdRebuild(args []string) error {
+	return runRebuild(args)
+}
+
+func runRebuild(args []string) error {
+	flags := flag.NewFlagSet("rebuild", flag.ExitOnError)
 	dbPath := flags.String("db", "", "database path")
 	maxBytes := flags.Int64("max-bytes", 1_000_000, "skip files larger than this")
 	var extraIgnored repeatedFlag
@@ -316,7 +406,7 @@ func cmdBuild(args []string) error {
 		return err
 	}
 	if flags.NArg() != 1 {
-		return errors.New("usage: code-index build [--db DB] [--max-bytes N] ROOT")
+		return errors.New("usage: code-index rebuild [--db DB] [--max-bytes N] ROOT")
 	}
 	if _, err := exec.LookPath("sqlite3"); err != nil {
 		return errors.New("sqlite3 command not found")
@@ -339,19 +429,24 @@ func cmdBuild(args []string) error {
 	if err := os.MkdirAll(filepath.Dir(db), 0o755); err != nil {
 		return err
 	}
-	for _, suffix := range []string{"", "-wal", "-shm"} {
-		if err := os.Remove(db + suffix); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-	}
-	fts := hasFTS5()
-	writer, wait, err := sqliteWriter(db)
+	tmpDB, err := createTempDBPath(db)
 	if err != nil {
 		return err
 	}
-	ok := false
+	installed := false
 	defer func() {
-		if !ok {
+		if !installed {
+			_ = removeDBFiles(tmpDB)
+		}
+	}()
+	fts := hasFTS5()
+	writer, wait, err := sqliteWriter(tmpDB)
+	if err != nil {
+		return err
+	}
+	writerOK := false
+	defer func() {
+		if !writerOK {
 			_ = writer.Close()
 			_ = wait()
 		}
@@ -456,7 +551,11 @@ func cmdBuild(args []string) error {
 	if err := wait(); err != nil {
 		return err
 	}
-	ok = true
+	writerOK = true
+	if err := installBuiltDB(tmpDB, db); err != nil {
+		return err
+	}
+	installed = true
 	fmt.Printf("db: %s\n", db)
 	fmt.Printf("root: %s\n", root)
 	fmt.Printf("files: %d\n", fileCount)
@@ -682,6 +781,49 @@ func defaultCacheDir() string {
 	return filepath.Join(os.TempDir(), "code-index")
 }
 
+func createTempDBPath(db string) (string, error) {
+	file, err := os.CreateTemp(filepath.Dir(db), "."+filepath.Base(db)+".*.tmp")
+	if err != nil {
+		return "", err
+	}
+	name := file.Name()
+	if err := file.Close(); err != nil {
+		_ = removeDBFiles(name)
+		return "", err
+	}
+	return name, nil
+}
+
+func installBuiltDB(tmpDB, db string) error {
+	if err := removeDBSidecars(db); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpDB, db); err != nil {
+		return err
+	}
+	_ = removeDBSidecars(tmpDB)
+	return nil
+}
+
+func removeDBFiles(db string) error {
+	if err := removeDBSidecars(db); err != nil {
+		return err
+	}
+	if err := os.Remove(db); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+func removeDBSidecars(db string) error {
+	for _, suffix := range []string{"-wal", "-shm", "-journal"} {
+		if err := os.Remove(db + suffix); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
+}
+
 func requiredDB(db, root string) string {
 	if db != "" {
 		return db
@@ -775,7 +917,7 @@ create index idx_file_metrics_language on file_metrics(language);
 
 func runSQLitePrint(db, sql string) error {
 	if _, err := os.Stat(db); err != nil {
-		return fmt.Errorf("index not found: %s; run build first, or pass --db", db)
+		return fmt.Errorf("index not found: %s; run rebuild first, or pass --db", db)
 	}
 	cmd := exec.Command("sqlite3", "-batch", db)
 	cmd.Stdout = os.Stdout

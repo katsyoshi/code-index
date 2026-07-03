@@ -35,6 +35,9 @@ jobs:
 
       - name: Smoke test
         run: |
-          /tmp/code-index-bin build .
+          tmpdir="$(mktemp -d)"
+          /tmp/code-index-bin init --db "$tmpdir/init.sqlite" .
+          /tmp/code-index-bin stats --db "$tmpdir/init.sqlite"
+          /tmp/code-index-bin rebuild .
           /tmp/code-index-bin stats --root .
           /tmp/code-index-bin metrics --root .
