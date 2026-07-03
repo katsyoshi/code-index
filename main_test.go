@@ -85,6 +85,106 @@ func TestInstallBuiltDBReplacesDBAndRemovesSidecars(t *testing.T) {
 	}
 }
 
+func TestIndexLockPreventsConcurrentBuilds(t *testing.T) {
+	db := filepath.Join(t.TempDir(), "index.sqlite")
+	lock, err := acquireIndexLock(db, "rebuild", "/repo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.release()
+
+	_, err = acquireIndexLock(db, "rebuild", "/repo")
+	if err == nil {
+		t.Fatal("second lock acquisition succeeded, want failure")
+	}
+	if !isIndexLocked(err) {
+		t.Fatalf("lock error isIndexLocked = false, err = %v", err)
+	}
+	if !strings.Contains(err.Error(), "already in progress") {
+		t.Fatalf("lock error = %q, want already in progress", err)
+	}
+	lock.release()
+	if _, err := os.Stat(indexLockPath(db)); !os.IsNotExist(err) {
+		t.Fatalf("lock file still exists or returned unexpected error: %v", err)
+	}
+}
+
+func TestQueryLockNoticeUsesPreviousIndex(t *testing.T) {
+	db := filepath.Join(t.TempDir(), "index.sqlite")
+	if err := os.WriteFile(db, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := acquireIndexLock(db, "rebuild", "/repo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.release()
+
+	notice, err := queryLockNotice(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(notice, "rebuild") || !strings.Contains(notice, "using previous index") {
+		t.Fatalf("notice = %q, want rebuild warning with previous index", notice)
+	}
+}
+
+func TestQueryLockNoticeFailsWithoutPreviousIndex(t *testing.T) {
+	db := filepath.Join(t.TempDir(), "index.sqlite")
+	lock, err := acquireIndexLock(db, "init", "/repo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.release()
+
+	_, err = queryLockNotice(db)
+	if err == nil {
+		t.Fatal("queryLockNotice succeeded, want failure")
+	}
+	if !strings.Contains(err.Error(), "no previous index") {
+		t.Fatalf("error = %q, want no previous index", err)
+	}
+}
+
+func TestRebuildSkipsWhenLocked(t *testing.T) {
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		t.Skip("sqlite3 command not found")
+	}
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	db := filepath.Join(t.TempDir(), "index.sqlite")
+	lock, err := acquireIndexLock(db, "rebuild", root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.release()
+
+	if err := run([]string{"rebuild", "--db", db, root}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(db); !os.IsNotExist(err) {
+		t.Fatalf("db exists after skipped rebuild or returned unexpected error: %v", err)
+	}
+}
+
+func TestStatusReportsLock(t *testing.T) {
+	db := filepath.Join(t.TempDir(), "index.sqlite")
+	if err := os.WriteFile(db, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := acquireIndexLock(db, "rebuild", "/repo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.release()
+
+	if err := run([]string{"status", "--db", db}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestInitCommandCreatesEmptySQLiteIndexAndFailsIfExists(t *testing.T) {
 	if _, err := exec.LookPath("sqlite3"); err != nil {
 		t.Skip("sqlite3 command not found")
@@ -104,6 +204,9 @@ func TestInitCommandCreatesEmptySQLiteIndexAndFailsIfExists(t *testing.T) {
 	}
 	if strings.TrimSpace(string(out)) != "0" {
 		t.Fatalf("file count = %q, want 0", out)
+	}
+	if _, err := os.Stat(indexLockPath(db)); !os.IsNotExist(err) {
+		t.Fatalf("lock file still exists or returned unexpected error: %v", err)
 	}
 	if err := run([]string{"init", "--db", db, root}); err == nil {
 		t.Fatal("second init succeeded, want failure")
@@ -125,6 +228,9 @@ func TestRebuildCommandCreatesSQLiteIndex(t *testing.T) {
 	}
 	if _, err := os.Stat(db); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := os.Stat(indexLockPath(db)); !os.IsNotExist(err) {
+		t.Fatalf("lock file still exists or returned unexpected error: %v", err)
 	}
 
 	out, err := exec.Command("sqlite3", "-batch", db, "select count(*) from symbols where name = 'main';").Output()

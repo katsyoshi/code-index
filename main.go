@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -154,6 +155,17 @@ type fileMetrics struct {
 	symbolCount  int
 }
 
+type indexLock struct {
+	path string
+}
+
+type indexLockInfo struct {
+	operation string
+	root      string
+	pid       string
+	startedAt string
+}
+
 var symbolPatterns = map[string][]symbolSpec{
 	"python": {
 		spec(`^\s*(?:async\s+)?def\s+([A-Za-z_]\w*)\s*\(`, "function"),
@@ -251,6 +263,8 @@ var skipSymbolNames = map[string]bool{
 	"with":   true,
 }
 
+var errIndexLocked = errors.New("index locked")
+
 func spec(pattern, kind string) symbolSpec {
 	return symbolSpec{re: regexp.MustCompile(pattern), kind: kind}
 }
@@ -286,6 +300,8 @@ func run(args []string) error {
 		return cmdStats(args[1:])
 	case "metrics":
 		return cmdMetrics(args[1:])
+	case "status":
+		return cmdStatus(args[1:])
 	default:
 		usage()
 		return fmt.Errorf("unknown command: %s", args[0])
@@ -293,7 +309,7 @@ func run(args []string) error {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: code-index <path|init|rebuild|defs|files|sql|show|stats|metrics> [options]")
+	fmt.Fprintln(os.Stderr, "usage: code-index <path|init|rebuild|defs|files|sql|show|stats|metrics|status> [options]")
 }
 
 func cmdPath(args []string) error {
@@ -341,6 +357,16 @@ func cmdInit(args []string) error {
 		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(db), 0o755); err != nil {
+		return err
+	}
+	lock, err := acquireIndexLock(db, "init", root)
+	if err != nil {
+		return err
+	}
+	defer lock.release()
+	if _, err := os.Stat(db); err == nil {
+		return fmt.Errorf("index already exists: %s; run rebuild to replace it", db)
+	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	tmpDB, err := createTempDBPath(db)
@@ -429,6 +455,15 @@ func runRebuild(args []string) error {
 	if err := os.MkdirAll(filepath.Dir(db), 0o755); err != nil {
 		return err
 	}
+	lock, err := acquireIndexLock(db, "rebuild", root)
+	if err != nil {
+		if isIndexLocked(err) {
+			fmt.Fprintf(os.Stderr, "index rebuild already in progress; skipped: %s\n", db)
+			return nil
+		}
+		return err
+	}
+	defer lock.release()
 	tmpDB, err := createTempDBPath(db)
 	if err != nil {
 		return err
@@ -752,6 +787,43 @@ limit %d;`, where, *limit)
 	return runSQLitePrint(requiredDB(*db, *root), sql)
 }
 
+func cmdStatus(args []string) error {
+	fs := flag.NewFlagSet("status", flag.ExitOnError)
+	root := fs.String("root", "", "repository root for default database path")
+	dbFlag := fs.String("db", "", "database path")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return errors.New("usage: code-index status [--root ROOT|--db DB]")
+	}
+	db := requiredDB(*dbFlag, *root)
+	dbExists := fileExists(db)
+	lockInfo, locked, err := readIndexLock(db)
+	if err != nil {
+		return err
+	}
+	if !dbExists && !locked {
+		return fmt.Errorf("index not found: %s; run init or rebuild first, or pass --db", db)
+	}
+	fmt.Println("key\tvalue")
+	fmt.Printf("db\t%s\n", db)
+	fmt.Printf("exists\t%s\n", yesNo(dbExists))
+	fmt.Printf("locked\t%s\n", yesNo(locked))
+	if locked {
+		fmt.Printf("lock\t%s\n", indexLockPath(db))
+		fmt.Printf("operation\t%s\n", lockInfo.operationName())
+		fmt.Printf("pid\t%s\n", lockInfo.pidText())
+		if lockInfo.startedAt != "" {
+			fmt.Printf("started_at\t%s\n", lockInfo.startedAt)
+		}
+		if lockInfo.root != "" {
+			fmt.Printf("root\t%s\n", lockInfo.root)
+		}
+	}
+	return nil
+}
+
 type repeatedFlag []string
 
 func (r *repeatedFlag) String() string {
@@ -779,6 +851,120 @@ func defaultCacheDir() string {
 		return filepath.Join(home, ".cache", "code-index")
 	}
 	return filepath.Join(os.TempDir(), "code-index")
+}
+
+func indexLockPath(db string) string {
+	return db + ".lock"
+}
+
+func acquireIndexLock(db, operation, root string) (*indexLock, error) {
+	path := indexLockPath(db)
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		if errors.Is(err, os.ErrExist) {
+			info, ok, readErr := readIndexLock(db)
+			if readErr != nil || !ok {
+				return nil, fmt.Errorf("%w: index operation already in progress: %s", errIndexLocked, path)
+			}
+			return nil, fmt.Errorf("%w: index %s already in progress for %s (pid %s, lock: %s)", errIndexLocked, info.operationName(), db, info.pidText(), path)
+		}
+		return nil, err
+	}
+	ok := false
+	defer func() {
+		if !ok {
+			_ = file.Close()
+			_ = os.Remove(path)
+		}
+	}()
+	if _, err := fmt.Fprintf(
+		file,
+		"operation=%s\nroot=%s\npid=%d\nstarted_at=%s\n",
+		operation,
+		root,
+		os.Getpid(),
+		time.Now().UTC().Format(time.RFC3339),
+	); err != nil {
+		return nil, err
+	}
+	if err := file.Close(); err != nil {
+		return nil, err
+	}
+	ok = true
+	return &indexLock{path: path}, nil
+}
+
+func isIndexLocked(err error) bool {
+	return errors.Is(err, errIndexLocked)
+}
+
+func (l *indexLock) release() {
+	if l != nil {
+		_ = os.Remove(l.path)
+	}
+}
+
+func readIndexLock(db string) (indexLockInfo, bool, error) {
+	data, err := os.ReadFile(indexLockPath(db))
+	if errors.Is(err, os.ErrNotExist) {
+		return indexLockInfo{}, false, nil
+	}
+	if err != nil {
+		return indexLockInfo{}, false, err
+	}
+	return parseIndexLock(string(data)), true, nil
+}
+
+func parseIndexLock(text string) indexLockInfo {
+	var info indexLockInfo
+	for _, line := range strings.Split(text, "\n") {
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		switch key {
+		case "operation":
+			info.operation = value
+		case "root":
+			info.root = value
+		case "pid":
+			info.pid = value
+		case "started_at":
+			info.startedAt = value
+		}
+	}
+	return info
+}
+
+func (info indexLockInfo) operationName() string {
+	if info.operation != "" {
+		return info.operation
+	}
+	return "operation"
+}
+
+func (info indexLockInfo) pidText() string {
+	if info.pid != "" {
+		return info.pid
+	}
+	return "unknown"
+}
+
+func queryLockNotice(db string) (string, error) {
+	info, locked, err := readIndexLock(db)
+	if err != nil {
+		return "", err
+	}
+	if _, err := os.Stat(db); err != nil {
+		if locked && errors.Is(err, os.ErrNotExist) {
+			return "", fmt.Errorf("index %s in progress: %s; no previous index is available yet", info.operationName(), db)
+		}
+		return "", fmt.Errorf("index not found: %s; run rebuild first, or pass --db", db)
+	}
+	if locked {
+		return fmt.Sprintf("warning: index %s in progress; using previous index: %s\n", info.operationName(), db), nil
+	}
+	return "", nil
 }
 
 func createTempDBPath(db string) (string, error) {
@@ -836,6 +1022,11 @@ func requiredDB(db, root string) string {
 		return defaultDBPath(root)
 	}
 	return defaultDBPath(abs)
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 func hasFTS5() bool {
@@ -916,8 +1107,12 @@ create index idx_file_metrics_language on file_metrics(language);
 }
 
 func runSQLitePrint(db, sql string) error {
-	if _, err := os.Stat(db); err != nil {
-		return fmt.Errorf("index not found: %s; run rebuild first, or pass --db", db)
+	notice, err := queryLockNotice(db)
+	if err != nil {
+		return err
+	}
+	if notice != "" {
+		fmt.Fprint(os.Stderr, notice)
 	}
 	cmd := exec.Command("sqlite3", "-batch", db)
 	cmd.Stdout = os.Stdout

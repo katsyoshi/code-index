@@ -28,6 +28,14 @@ Rebuild an index atomically:
 ./code-index rebuild /path/to/repo
 ```
 
+If another `init` or `rebuild` is already running for the same database, `rebuild` skips and exits successfully.
+
+Show index status:
+
+```sh
+./code-index status --root /path/to/repo
+```
+
 Find symbol definitions:
 
 ```sh
@@ -99,7 +107,7 @@ EOF
 chmod +x .git/hooks/post-merge
 ```
 
-The examples run in the background so Git commands do not wait for indexing. Queries keep using the previous index until the rebuild finishes and replaces it.
+The examples run in the background so Git commands do not wait for indexing. During `init` and `rebuild`, `code-index` writes a `.lock` file next to the target database. Queries keep using the previous index until `rebuild` finishes and replaces it, and print a warning to stderr while the lock is present. If no previous index exists yet, queries fail with a message that initialization or rebuilding is still in progress.
 
 ## Schema
 
