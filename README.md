@@ -6,9 +6,9 @@ It is not intended to replace language servers, VCS indexes, or full code-intell
 
 The binary is written in Go and uses the `sqlite3` command for database creation and queries. The built binary does not require a Go runtime.
 
-The Codex skill source lives at `skills/code-index/SKILL.md`. It prefers an external `code-index` binary on `PATH` and keeps bundled skill copies as a fallback.
+The reusable agent skill source lives at `skills/code-index/SKILL.md`. It is written to be usable by coding agents such as Codex or Claude, and prefers an external `code-index` binary on `PATH`.
 
-For local Codex development, keep the checked-in skill as the source of truth and symlink it into your Codex skills directory:
+For local agent-skill development, keep the checked-in skill as the source of truth and symlink or copy it into the skill directory used by your agent runtime. For Codex:
 
 ```sh
 mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
@@ -16,6 +16,8 @@ ln -s "$PWD/skills/code-index" "${CODEX_HOME:-$HOME/.codex}/skills/code-index"
 ```
 
 If the target already exists, remove or rename it first.
+
+Host-specific metadata can live under `skills/code-index/agents/`; agents that do not use those files can ignore them.
 
 ## Build
 

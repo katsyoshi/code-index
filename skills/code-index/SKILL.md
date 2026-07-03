@@ -1,6 +1,6 @@
 ---
 name: code-index
-description: Build and use a local SQLite index for code navigation instead of ad hoc grep/rg/find searches. Use when Codex needs to locate files, classes, functions, methods, symbols, definitions, references, source lines, code metrics, or index status across an unfamiliar repository; when repeated codebase lookup would otherwise use shell text search; or when the user asks for SQL-backed, database-backed, or indexed code search.
+description: Build and use a local SQLite index for code navigation instead of ad hoc grep/rg/find searches. Use when an AI coding agent needs to locate files, classes, functions, methods, symbols, definitions, references, source lines, code metrics, or index status across an unfamiliar repository; when repeated codebase lookup would otherwise use shell text search; or when the user asks for SQL-backed, database-backed, or indexed code search.
 ---
 
 # Code Index
@@ -9,7 +9,7 @@ description: Build and use a local SQLite index for code navigation instead of a
 
 Use `code-index` as the first search surface for codebase navigation. Prefer SQL-backed queries for locating files, definitions, methods, classes, relevant source lines, metrics, and index status.
 
-The preferred tool is an external `code-index` binary on `PATH`. A bundled `scripts/code-index` binary may exist in installed skill copies, but it should be treated only as a fallback and may lag the standalone CLI.
+Use an external `code-index` binary on `PATH`. If an agent runtime installs this skill with a bundled `scripts/code-index` helper, treat that helper only as a fallback because it may lag the standalone CLI.
 
 ## Workflow
 
@@ -17,15 +17,15 @@ The preferred tool is an external `code-index` binary on `PATH`. A bundled `scri
 2. Select the tool:
 
 ```bash
-if command -v code-index >/dev/null 2>&1; then
-  TOOL="$(command -v code-index)"
-else
-  TOOL="${CODEX_HOME:-$HOME/.codex}/skills/code-index/scripts/code-index"
-  test -x "$TOOL" || TOOL="${CODEX_HOME:-$HOME/.codex}/skills/code-sql-search/scripts/code-index"
+if ! command -v code-index >/dev/null 2>&1; then
+  echo "code-index is not available on PATH" >&2
+  exit 1
 fi
+
+TOOL="$(command -v code-index)"
 ```
 
-3. In Codex sandboxed sessions, prefer a writable cache directory unless the user gave a DB path:
+3. In sandboxed agent sessions, prefer a writable cache directory unless the user gave a DB path:
 
 ```bash
 export CODE_INDEX_CACHE_DIR="${CODE_INDEX_CACHE_DIR:-/tmp/code-index}"
