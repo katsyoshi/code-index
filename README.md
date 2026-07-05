@@ -134,10 +134,13 @@ chmod +x .git/hooks/post-merge
 
 The examples run in the background so Git commands do not wait for indexing. During `init`, `rebuild`, and `update`, `code-index` writes a `.lock` file next to the target database. Queries keep using a consistent SQLite snapshot and print a warning to stderr while the lock is present. If no previous index exists yet, queries fail with a message that initialization or rebuilding is still in progress.
 
+`status` combines the lock file with database metadata. Lock fields describe a currently running operation; metadata such as `updated_at`, `last_operation`, `vcs_revision`, and `vcs_ref` describes the last successful update.
+
 ## Schema
 
 Main tables:
 
+- `meta`: schema version, file source, hash algorithm, last successful update time, operation, and VCS revision metadata
 - `files`: repository-relative paths and file metadata
 - `symbols`: regex-extracted definitions such as functions, methods, classes, modules, interfaces, traits, and types
 - `lines`: indexed source lines

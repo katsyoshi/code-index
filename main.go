@@ -284,7 +284,9 @@ var skipSymbolNames = map[string]bool{
 
 var errIndexLocked = errors.New("index locked")
 
+const schemaVersion = "1"
 const contentHashAlgorithm = "sha256"
+const fileSource = "git-tracked"
 
 func spec(pattern, kind string) symbolSpec {
 	return symbolSpec{re: regexp.MustCompile(pattern), kind: kind}
@@ -415,9 +417,7 @@ func cmdInit(args []string) error {
 		}
 	}()
 	writeSchema(writer, fts)
-	writeSQL(writer, "insert into meta(key, value) values(%s, %s);\n", quote("root"), quote(root))
-	writeSQL(writer, "insert into meta(key, value) values(%s, %s);\n", quote("fts5"), quote(boolText(fts)))
-	writeSQL(writer, "insert into meta(key, value) values(%s, %s);\n", quote("hash_algorithm"), quote(contentHashAlgorithm))
+	writeOperationMetaSQL(writer, root, "init", fts)
 	writeSQL(writer, "commit;\n")
 	if err := writer.Close(); err != nil {
 		return err
@@ -516,9 +516,6 @@ func runRebuild(args []string) error {
 		}
 	}()
 	writeSchema(writer, fts)
-	writeSQL(writer, "insert into meta(key, value) values(%s, %s);\n", quote("root"), quote(root))
-	writeSQL(writer, "insert into meta(key, value) values(%s, %s);\n", quote("fts5"), quote(boolText(fts)))
-	writeSQL(writer, "insert into meta(key, value) values(%s, %s);\n", quote("hash_algorithm"), quote(contentHashAlgorithm))
 	ignored := cloneIgnored(extraIgnored)
 	var fileCount, symbolCount, lineCount int
 	var codeLineCount, commentLineCount, blankLineCount int
@@ -542,6 +539,7 @@ func runRebuild(args []string) error {
 	if err != nil {
 		return err
 	}
+	writeOperationMetaSQL(writer, root, "rebuild", fts)
 	writeSQL(writer, "commit;\n")
 	if err := writer.Close(); err != nil {
 		return err
@@ -637,8 +635,6 @@ func runUpdate(args []string) error {
 	writeSQL(writer, ".bail on\n")
 	writeSQL(writer, ".timeout 5000\n")
 	writeSQL(writer, "begin immediate;\n")
-	writeSQL(writer, "insert or replace into meta(key, value) values(%s, %s);\n", quote("root"), quote(root))
-	writeSQL(writer, "insert or replace into meta(key, value) values(%s, %s);\n", quote("hash_algorithm"), quote(contentHashAlgorithm))
 	ignored := cloneIgnored(extraIgnored)
 	seen := map[string]bool{}
 	var added, updated, deleted, unchanged int
@@ -679,6 +675,7 @@ func runUpdate(args []string) error {
 		writeFileIndexDeleteSQL(writer, rel, fts)
 		deleted++
 	}
+	writeOperationMetaSQL(writer, root, "update", fts)
 	writeSQL(writer, "commit;\n")
 	if err := writer.Close(); err != nil {
 		return err
@@ -829,6 +826,13 @@ func cmdStats(args []string) error {
 		return err
 	}
 	sql := `select 'root' as key, value from meta where key = 'root'
+union all select 'schema_version', value from meta where key = 'schema_version'
+union all select 'file_source', value from meta where key = 'file_source'
+union all select 'updated_at', value from meta where key = 'updated_at'
+union all select 'last_operation', value from meta where key = 'last_operation'
+union all select 'vcs_kind', value from meta where key = 'vcs_kind'
+union all select 'vcs_revision', value from meta where key = 'vcs_revision'
+union all select 'vcs_ref', value from meta where key = 'vcs_ref'
 union all select 'files', cast(count(*) as text) from files
 union all select 'symbols', cast(count(*) as text) from symbols
 union all select 'lines', cast(count(*) as text) from lines
@@ -911,18 +915,44 @@ func cmdStatus(args []string) error {
 	fmt.Printf("db\t%s\n", db)
 	fmt.Printf("exists\t%s\n", yesNo(dbExists))
 	fmt.Printf("locked\t%s\n", yesNo(locked))
+	if dbExists {
+		meta, err := loadMeta(db)
+		if err != nil {
+			return err
+		}
+		printMetaStatus(meta)
+	}
 	if locked {
 		fmt.Printf("lock\t%s\n", indexLockPath(db))
-		fmt.Printf("operation\t%s\n", lockInfo.operationName())
-		fmt.Printf("pid\t%s\n", lockInfo.pidText())
+		fmt.Printf("lock_operation\t%s\n", lockInfo.operationName())
+		fmt.Printf("lock_pid\t%s\n", lockInfo.pidText())
 		if lockInfo.startedAt != "" {
-			fmt.Printf("started_at\t%s\n", lockInfo.startedAt)
+			fmt.Printf("lock_started_at\t%s\n", lockInfo.startedAt)
 		}
 		if lockInfo.root != "" {
-			fmt.Printf("root\t%s\n", lockInfo.root)
+			fmt.Printf("lock_root\t%s\n", lockInfo.root)
 		}
 	}
 	return nil
+}
+
+func printMetaStatus(meta map[string]string) {
+	for _, key := range []string{
+		"root",
+		"schema_version",
+		"file_source",
+		"hash_algorithm",
+		"updated_at",
+		"last_operation",
+		"vcs_kind",
+		"vcs_revision",
+		"vcs_ref",
+		"fts5",
+	} {
+		if value := meta[key]; value != "" {
+			fmt.Printf("%s\t%s\n", key, value)
+		}
+	}
 }
 
 type repeatedFlag []string
@@ -1165,6 +1195,72 @@ func sqliteQueryOutput(db, sql string) (string, error) {
 		return "", fmt.Errorf("sqlite3 query failed: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return string(out), nil
+}
+
+type metaPair struct {
+	key   string
+	value string
+}
+
+func writeOperationMetaSQL(w io.Writer, root, operation string, fts bool) {
+	pairs := []metaPair{
+		{"schema_version", schemaVersion},
+		{"root", root},
+		{"file_source", fileSource},
+		{"hash_algorithm", contentHashAlgorithm},
+		{"fts5", boolText(fts)},
+		{"updated_at", time.Now().UTC().Format(time.RFC3339)},
+		{"last_operation", operation},
+	}
+	pairs = append(pairs, currentVCSMeta(root)...)
+	for _, pair := range pairs {
+		if pair.value == "" {
+			continue
+		}
+		writeSQL(w, "insert or replace into meta(key, value) values(%s, %s);\n", quote(pair.key), quote(pair.value))
+	}
+}
+
+func currentVCSMeta(root string) []metaPair {
+	if out, err := gitOutput(root, "rev-parse", "--is-inside-work-tree"); err != nil || out != "true" {
+		return nil
+	}
+	pairs := []metaPair{{"vcs_kind", "git"}}
+	if revision, err := gitOutput(root, "rev-parse", "--verify", "HEAD"); err == nil {
+		pairs = append(pairs, metaPair{"vcs_revision", revision})
+	}
+	if ref, err := gitOutput(root, "symbolic-ref", "--quiet", "--short", "HEAD"); err == nil {
+		pairs = append(pairs, metaPair{"vcs_ref", ref})
+	}
+	return pairs
+}
+
+func gitOutput(root string, args ...string) (string, error) {
+	cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("git %s failed: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func loadMeta(db string) (map[string]string, error) {
+	out, err := sqliteQueryOutput(db, "select key, value from meta order by key;")
+	if err != nil {
+		return nil, err
+	}
+	meta := map[string]string{}
+	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		if line == "" {
+			continue
+		}
+		key, value, ok := strings.Cut(line, "\t")
+		if !ok {
+			return nil, fmt.Errorf("unexpected meta row from sqlite3: %q", line)
+		}
+		meta[key] = value
+	}
+	return meta, nil
 }
 
 func loadIndexedFileStates(db string) (map[string]indexedFileState, error) {

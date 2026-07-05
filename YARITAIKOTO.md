@@ -9,7 +9,7 @@
   - `status` に schema version, indexed_at, branch/head/dirty などを増やすか検討する。
 
 - `update` の運用を詰める
-  - rename・ignore 設定変更・schema 変更の扱いを決める。
+  - rename・schema 変更の扱いを決める。
   - `rebuild` は full rebuild、`update` は incremental refresh という分担を維持する。
   - update/partial build を入れるタイミングで、DB 内の管理テーブルも検討する。
     - `config`: `max_bytes`, `ignore_dirs`, enabled components など。
@@ -35,6 +35,8 @@
   - `schema`: DB schema を簡潔に表示する。
   - schema version を `meta` に入れる。
   - schema migration するのか、古い DB は rebuild を促すのか決める。
+  - content hash algorithm を固定にするか、`sha256` / `blake3` / `xxhash` などから選べるようにするか決める。
+    - 変更できるようにする場合は、DB の `meta.hash_algorithm` と CLI option/config の不一致時に rebuild を促す。
 
 - symbol 抽出を強くする
   - regex ベースは維持しつつ、optional で tree-sitter を検討する。
@@ -67,9 +69,15 @@
 
 - `code-index` に名前を統一した。
 - `update` コマンドを追加した。
-  - 既存 DB の変更ファイルを差し替える。
-  - 削除されたファイル、ignore 対象になったファイルを DB から削除する。
+  - 既存 DB の変更された Git tracked file を差し替える。
+  - Git で track されなくなったファイルを DB から削除する。
   - `init` 済みの空DBにも投入できる。
+- `rebuild` / `update` の対象を Git tracked file のみにした。
+  - `git ls-files` の結果を使う。
+  - untracked / ignored / Git 管理外ファイルは index 対象外にする。
+- content hash を SHA-256 にした。
+  - `files.content_hash` に保存する。
+  - `meta.hash_algorithm` に `sha256` を保存する。
 - `file_metrics` テーブルと `metrics` コマンドを追加した。
 - GitHub Actions CI を追加した。
   - `go test ./...`

@@ -93,7 +93,7 @@ Common commands:
 # Incrementally refresh changed tracked files and remove files no longer tracked by Git.
 "$TOOL" update "$PWD"
 
-# Show index status and lock state.
+# Show lock state and metadata from the last successful update.
 "$TOOL" status --root "$PWD"
 
 # Find symbols.

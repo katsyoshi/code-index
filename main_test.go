@@ -194,9 +194,6 @@ func TestUpdateSkipsWhenLockedWithoutExistingDB(t *testing.T) {
 
 func TestStatusReportsLock(t *testing.T) {
 	db := filepath.Join(t.TempDir(), "index.sqlite")
-	if err := os.WriteFile(db, []byte("old"), 0o644); err != nil {
-		t.Fatal(err)
-	}
 	lock, err := acquireIndexLock(db, "rebuild", "/repo")
 	if err != nil {
 		t.Fatal(err)
@@ -228,6 +225,11 @@ func TestInitCommandCreatesEmptySQLiteIndexAndFailsIfExists(t *testing.T) {
 	if strings.TrimSpace(string(out)) != "0" {
 		t.Fatalf("file count = %q, want 0", out)
 	}
+	assertMetaValue(t, db, "schema_version", schemaVersion)
+	assertMetaValue(t, db, "file_source", fileSource)
+	assertMetaValue(t, db, "hash_algorithm", contentHashAlgorithm)
+	assertMetaValue(t, db, "last_operation", "init")
+	assertSQLiteValue(t, db, "select count(*) from meta where key = 'updated_at' and value != '';", "1")
 	if _, err := os.Stat(indexLockPath(db)); !os.IsNotExist(err) {
 		t.Fatalf("lock file still exists or returned unexpected error: %v", err)
 	}
@@ -270,7 +272,37 @@ func TestRebuildCommandCreatesSQLiteIndex(t *testing.T) {
 	if strings.TrimSpace(string(out)) != "1" {
 		t.Fatalf("main symbol count = %q, want 1", out)
 	}
+	assertMetaValue(t, db, "schema_version", schemaVersion)
+	assertMetaValue(t, db, "file_source", fileSource)
+	assertMetaValue(t, db, "hash_algorithm", contentHashAlgorithm)
+	assertMetaValue(t, db, "last_operation", "rebuild")
+	assertMetaValue(t, db, "vcs_kind", "git")
 	assertSQLiteValue(t, db, "select count(*) from symbols where name = 'untracked';", "0")
+}
+
+func TestRebuildStoresVCSRevision(t *testing.T) {
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		t.Skip("sqlite3 command not found")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git command not found")
+	}
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	initGitRepo(t, root, "main.go")
+	runGit(t, root, "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "initial")
+	revision := runGitOutput(t, root, "rev-parse", "HEAD")
+	ref := runGitOutput(t, root, "symbolic-ref", "--quiet", "--short", "HEAD")
+	db := filepath.Join(t.TempDir(), "index.sqlite")
+
+	if err := run([]string{"rebuild", "--db", db, root}); err != nil {
+		t.Fatal(err)
+	}
+
+	assertMetaValue(t, db, "vcs_revision", revision)
+	assertMetaValue(t, db, "vcs_ref", ref)
 }
 
 func TestUpdateCommandAppliesFileChanges(t *testing.T) {
@@ -318,6 +350,7 @@ func TestUpdateCommandAppliesFileChanges(t *testing.T) {
 	assertSQLiteValue(t, db, "select count(*) from files where path = 'stale.rb';", "0")
 	assertSQLiteValue(t, db, "select count(*) from files where path = 'added.py';", "1")
 	assertSQLiteValue(t, db, "select count(*) from files where path = 'untracked.py';", "0")
+	assertMetaValue(t, db, "last_operation", "update")
 }
 
 func TestUpdateCommandIndexesInitializedDB(t *testing.T) {
@@ -374,6 +407,11 @@ func assertSQLiteValue(t *testing.T, db, sql, want string) {
 	}
 }
 
+func assertMetaValue(t *testing.T, db, key, want string) {
+	t.Helper()
+	assertSQLiteValue(t, db, "select value from meta where key = "+quote(key)+";", want)
+}
+
 func initGitRepo(t *testing.T, root string, paths ...string) {
 	t.Helper()
 	runGit(t, root, "init")
@@ -390,4 +428,14 @@ func runGit(t *testing.T, root string, args ...string) {
 	if err != nil {
 		t.Fatalf("git %s failed: %v: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}
+}
+
+func runGitOutput(t *testing.T, root string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s failed: %v: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+	}
+	return strings.TrimSpace(string(out))
 }
