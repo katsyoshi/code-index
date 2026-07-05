@@ -524,7 +524,7 @@ func runRebuild(args []string) error {
 	var codeLineCount, commentLineCount, blankLineCount int
 	nextFileID := 1
 	nextSymbolID := 1
-	err = walkSourceFiles(root, ignored, *maxBytes, func(path string, info fs.FileInfo) error {
+	err = walkGitTrackedFiles(root, ignored, *maxBytes, func(path string, info fs.FileInfo) error {
 		index, err := scanFileIndex(root, path, info, *maxBytes)
 		if err != nil {
 			return nil
@@ -644,7 +644,7 @@ func runUpdate(args []string) error {
 	var added, updated, deleted, unchanged int
 	var symbolCount, lineCount int
 	var codeLineCount, commentLineCount, blankLineCount int
-	err = walkSourceFiles(root, ignored, *maxBytes, func(path string, info fs.FileInfo) error {
+	err = walkGitTrackedFiles(root, ignored, *maxBytes, func(path string, info fs.FileInfo) error {
 		index, err := scanFileIndex(root, path, info, *maxBytes)
 		if err != nil {
 			return nil
@@ -1310,27 +1310,54 @@ func validateReadOnlySQL(query string) error {
 	return nil
 }
 
-func walkSourceFiles(root string, ignored map[string]bool, maxBytes int64, fn func(path string, info fs.FileInfo) error) error {
-	return filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil
+func walkGitTrackedFiles(root string, ignored map[string]bool, maxBytes int64, fn func(path string, info fs.FileInfo) error) error {
+	if err := requireGitWorkTree(root); err != nil {
+		return err
+	}
+	cmd := exec.Command("git", "-C", root, "ls-files", "-z", "--", ".")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git ls-files failed: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	for _, rel := range strings.Split(string(out), "\x00") {
+		if rel == "" {
+			continue
 		}
-		name := d.Name()
-		if d.IsDir() {
-			if path != root && ignored[name] {
-				return filepath.SkipDir
-			}
-			return nil
+		rel = filepath.ToSlash(filepath.Clean(rel))
+		if rel == "." || strings.HasPrefix(rel, "../") || filepath.IsAbs(rel) || ignoredPath(rel, ignored) {
+			continue
 		}
-		if binaryExts[strings.ToLower(filepath.Ext(path))] {
-			return nil
+		if binaryExts[strings.ToLower(filepath.Ext(rel))] {
+			continue
 		}
-		info, err := d.Info()
-		if err != nil || info.Size() > maxBytes {
-			return nil
+		path := filepath.Join(root, filepath.FromSlash(rel))
+		info, err := os.Lstat(path)
+		if err != nil || info.IsDir() || !info.Mode().IsRegular() || info.Size() > maxBytes {
+			continue
 		}
-		return fn(path, info)
-	})
+		if err := fn(path, info); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func requireGitWorkTree(root string) error {
+	cmd := exec.Command("git", "-C", root, "rev-parse", "--is-inside-work-tree")
+	out, err := cmd.CombinedOutput()
+	if err != nil || strings.TrimSpace(string(out)) != "true" {
+		return fmt.Errorf("rebuild and update require a Git work tree: %s", root)
+	}
+	return nil
+}
+
+func ignoredPath(path string, ignored map[string]bool) bool {
+	for _, part := range strings.Split(filepath.ToSlash(path), "/") {
+		if ignored[part] {
+			return true
+		}
+	}
+	return false
 }
 
 func scanFileIndex(root, path string, info fs.FileInfo, maxBytes int64) (fileIndex, error) {

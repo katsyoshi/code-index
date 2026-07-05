@@ -31,7 +31,7 @@ TOOL="$(command -v code-index)"
 export CODE_INDEX_CACHE_DIR="${CODE_INDEX_CACHE_DIR:-/tmp/code-index}"
 ```
 
-4. Build or refresh the index before substantial search work. Prefer `update` when an index already exists, and fall back to `rebuild` for first use:
+4. Build or refresh the index before substantial search work. Prefer `update` when an index already exists, and fall back to `rebuild` for first use. Both commands index Git-tracked files only:
 
 ```bash
 "$TOOL" update "$PWD" || "$TOOL" rebuild "$PWD"
@@ -65,7 +65,7 @@ If `status` is unsupported, continue with query commands and rely on rebuild out
 "$TOOL" show --root "$PWD" --line 42 lib/config.rb
 ```
 
-9. Run `update` after editing files that affect search results. Use `rebuild` after tool upgrades, schema changes, or option changes that should refresh every file.
+9. Run `update` after editing tracked files that affect search results. Use `rebuild` after tool upgrades, schema changes, or option changes that should refresh every tracked file.
 
 ## Search Policy
 
@@ -87,10 +87,10 @@ Common commands:
 # Initialize an empty schema when explicitly needed.
 "$TOOL" init "$PWD"
 
-# Atomic full rebuild. Current CLI skips successfully if another operation holds the lock.
+# Atomic full rebuild from Git-tracked files. Current CLI skips successfully if another operation holds the lock.
 "$TOOL" rebuild "$PWD"
 
-# Incrementally refresh changed and deleted files.
+# Incrementally refresh changed tracked files and remove files no longer tracked by Git.
 "$TOOL" update "$PWD"
 
 # Show index status and lock state.

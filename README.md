@@ -35,13 +35,13 @@ Initialize an empty index database:
 
 `init` creates the schema and metadata only. It fails if the index database already exists.
 
-Rebuild an index atomically:
+Rebuild an index atomically from Git-tracked files:
 
 ```sh
 ./code-index rebuild /path/to/repo
 ```
 
-If another `init` or `rebuild` is already running for the same database, `rebuild` skips and exits successfully.
+`rebuild` requires a Git work tree and indexes files reported by `git ls-files`. If another `init`, `rebuild`, or `update` is already running for the same database, `rebuild` skips and exits successfully.
 
 Update an existing index incrementally:
 
@@ -49,7 +49,7 @@ Update an existing index incrementally:
 ./code-index update /path/to/repo
 ```
 
-`update` refreshes changed files and removes deleted or newly ignored files. It requires an existing database, so run `init` or `rebuild` first.
+`update` requires a Git work tree. It refreshes changed Git-tracked files and removes files that are no longer tracked. It requires an existing database, so run `init` or `rebuild` first.
 
 Show index status:
 
@@ -90,6 +90,8 @@ Show indexed code metrics:
 ```
 
 The default database is stored under `CODE_INDEX_CACHE_DIR` when set. Otherwise it uses `$XDG_CACHE_HOME/code-index` or `~/.cache/code-index`, keyed by the absolute repository path. Use `--db` to provide an explicit database path.
+
+`rebuild` and `update` index Git-tracked files only. Initialize Git and add files before indexing a directory.
 
 ## Git Hooks
 

@@ -240,10 +240,17 @@ func TestRebuildCommandCreatesSQLiteIndex(t *testing.T) {
 	if _, err := exec.LookPath("sqlite3"); err != nil {
 		t.Skip("sqlite3 command not found")
 	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git command not found")
+	}
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(root, "untracked.go"), []byte("package main\n\nfunc untracked() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	initGitRepo(t, root, "main.go")
 	db := filepath.Join(t.TempDir(), "index.sqlite")
 
 	if err := run([]string{"rebuild", "--db", db, root}); err != nil {
@@ -263,11 +270,15 @@ func TestRebuildCommandCreatesSQLiteIndex(t *testing.T) {
 	if strings.TrimSpace(string(out)) != "1" {
 		t.Fatalf("main symbol count = %q, want 1", out)
 	}
+	assertSQLiteValue(t, db, "select count(*) from symbols where name = 'untracked';", "0")
 }
 
 func TestUpdateCommandAppliesFileChanges(t *testing.T) {
 	if _, err := exec.LookPath("sqlite3"); err != nil {
 		t.Skip("sqlite3 command not found")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git command not found")
 	}
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n\nfunc oldName() {}\n"), 0o644); err != nil {
@@ -276,6 +287,7 @@ func TestUpdateCommandAppliesFileChanges(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "stale.rb"), []byte("def gone\nend\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	initGitRepo(t, root, "main.go", "stale.rb")
 	db := filepath.Join(t.TempDir(), "index.sqlite")
 	if err := run([]string{"rebuild", "--db", db, root}); err != nil {
 		t.Fatal(err)
@@ -290,6 +302,10 @@ func TestUpdateCommandAppliesFileChanges(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "added.py"), []byte("def added():\n    pass\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	runGit(t, root, "add", "added.py")
+	if err := os.WriteFile(filepath.Join(root, "untracked.py"), []byte("def local_only():\n    pass\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := run([]string{"update", "--db", db, root}); err != nil {
 		t.Fatal(err)
@@ -298,18 +314,24 @@ func TestUpdateCommandAppliesFileChanges(t *testing.T) {
 	assertSQLiteValue(t, db, "select count(*) from symbols where name = 'nextName';", "1")
 	assertSQLiteValue(t, db, "select count(*) from symbols where name = 'gone';", "0")
 	assertSQLiteValue(t, db, "select count(*) from symbols where name = 'added';", "1")
+	assertSQLiteValue(t, db, "select count(*) from symbols where name = 'local_only';", "0")
 	assertSQLiteValue(t, db, "select count(*) from files where path = 'stale.rb';", "0")
 	assertSQLiteValue(t, db, "select count(*) from files where path = 'added.py';", "1")
+	assertSQLiteValue(t, db, "select count(*) from files where path = 'untracked.py';", "0")
 }
 
 func TestUpdateCommandIndexesInitializedDB(t *testing.T) {
 	if _, err := exec.LookPath("sqlite3"); err != nil {
 		t.Skip("sqlite3 command not found")
 	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git command not found")
+	}
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	initGitRepo(t, root, "main.go")
 	db := filepath.Join(t.TempDir(), "index.sqlite")
 	if err := run([]string{"init", "--db", db, root}); err != nil {
 		t.Fatal(err)
@@ -320,6 +342,27 @@ func TestUpdateCommandIndexesInitializedDB(t *testing.T) {
 	assertSQLiteValue(t, db, "select count(*) from symbols where name = 'main';", "1")
 }
 
+func TestRebuildRequiresGitWorkTree(t *testing.T) {
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		t.Skip("sqlite3 command not found")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git command not found")
+	}
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	db := filepath.Join(t.TempDir(), "index.sqlite")
+	err := run([]string{"rebuild", "--db", db, root})
+	if err == nil {
+		t.Fatal("rebuild succeeded outside a Git work tree, want failure")
+	}
+	if !strings.Contains(err.Error(), "Git work tree") {
+		t.Fatalf("error = %q, want Git work tree", err)
+	}
+}
+
 func assertSQLiteValue(t *testing.T, db, sql, want string) {
 	t.Helper()
 	out, err := exec.Command("sqlite3", "-batch", "-noheader", db, sql).Output()
@@ -328,5 +371,23 @@ func assertSQLiteValue(t *testing.T, db, sql, want string) {
 	}
 	if got := strings.TrimSpace(string(out)); got != want {
 		t.Fatalf("sqlite value for %q = %q, want %q", sql, got, want)
+	}
+}
+
+func initGitRepo(t *testing.T, root string, paths ...string) {
+	t.Helper()
+	runGit(t, root, "init")
+	if len(paths) > 0 {
+		args := append([]string{"add"}, paths...)
+		runGit(t, root, args...)
+	}
+}
+
+func runGit(t *testing.T, root string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s failed: %v: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}
 }
