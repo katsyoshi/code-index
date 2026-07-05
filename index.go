@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	codesymbols "github.com/katsyoshi/code-index/internal/symbols"
 )
 
 type fileIndex struct {
@@ -22,7 +24,7 @@ type fileIndex struct {
 	contentHash string
 	text        string
 	lines       []string
-	symbols     []symbol
+	symbols     []codesymbols.Symbol
 	metrics     fileMetrics
 }
 
@@ -44,7 +46,7 @@ func scanFileIndex(root, path string, info fs.FileInfo, maxBytes int64) (fileInd
 	rel = filepath.ToSlash(rel)
 	language := detectLanguage(path)
 	lines := splitLines(text)
-	symbols := extractSymbols(rel, language, lines)
+	symbols := codesymbols.Extract(rel, language, lines)
 	metrics := computeFileMetrics(language, lines, len(symbols))
 	return fileIndex{
 		path:        rel,
@@ -120,14 +122,14 @@ func writeFileIndexInsertSQL(w io.Writer, index fileIndex, fts bool, fileID int,
 				"insert into symbols(id, file_id, path, language, kind, name, line, column, signature, context) values(%d, %s, %s, %s, %s, %s, %d, %d, %s, %s);\n",
 				*symbolID,
 				fileIDExpr,
-				quote(sym.path),
-				nullableQuote(sym.language),
-				quote(sym.kind),
-				quote(sym.name),
-				sym.line,
-				sym.column,
-				quote(sym.signature),
-				quote(sym.context),
+				quote(sym.Path),
+				nullableQuote(sym.Language),
+				quote(sym.Kind),
+				quote(sym.Name),
+				sym.Line,
+				sym.Column,
+				quote(sym.Signature),
+				quote(sym.Context),
 			)
 			*symbolID = *symbolID + 1
 		} else {
@@ -135,26 +137,26 @@ func writeFileIndexInsertSQL(w io.Writer, index fileIndex, fts bool, fileID int,
 				w,
 				"insert into symbols(file_id, path, language, kind, name, line, column, signature, context) values(%s, %s, %s, %s, %s, %d, %d, %s, %s);\n",
 				fileIDExpr,
-				quote(sym.path),
-				nullableQuote(sym.language),
-				quote(sym.kind),
-				quote(sym.name),
-				sym.line,
-				sym.column,
-				quote(sym.signature),
-				quote(sym.context),
+				quote(sym.Path),
+				nullableQuote(sym.Language),
+				quote(sym.Kind),
+				quote(sym.Name),
+				sym.Line,
+				sym.Column,
+				quote(sym.Signature),
+				quote(sym.Context),
 			)
 		}
 		if fts {
 			writeSQL(
 				w,
 				"insert into symbols_fts(name, kind, language, path, signature, context) values(%s, %s, %s, %s, %s, %s);\n",
-				quote(sym.name),
-				quote(sym.kind),
-				nullableQuote(sym.language),
-				quote(sym.path),
-				quote(sym.signature),
-				quote(sym.context),
+				quote(sym.Name),
+				quote(sym.Kind),
+				nullableQuote(sym.Language),
+				quote(sym.Path),
+				quote(sym.Signature),
+				quote(sym.Context),
 			)
 		}
 	}

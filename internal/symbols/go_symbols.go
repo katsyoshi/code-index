@@ -1,4 +1,4 @@
-package main
+package symbols
 
 import (
 	"go/ast"
@@ -9,7 +9,7 @@ import (
 
 type goSymbolExtractor struct{}
 
-func (goSymbolExtractor) extract(path, language string, lines []string) ([]symbol, bool) {
+func (goSymbolExtractor) extract(path, language string, lines []string) ([]Symbol, bool) {
 	source := strings.Join(lines, "\n")
 	fileset := token.NewFileSet()
 	file, err := parser.ParseFile(fileset, path, source, parser.SkipObjectResolution)
@@ -20,7 +20,7 @@ func (goSymbolExtractor) extract(path, language string, lines []string) ([]symbo
 		return nil, false
 	}
 
-	var out []symbol
+	var out []Symbol
 	for _, decl := range file.Decls {
 		switch decl := decl.(type) {
 		case *ast.FuncDecl:
@@ -36,8 +36,8 @@ func (goSymbolExtractor) extract(path, language string, lines []string) ([]symbo
 	return out, true
 }
 
-func goGenDeclSymbols(path, language string, decl *ast.GenDecl, fileset *token.FileSet, lines []string) []symbol {
-	var out []symbol
+func goGenDeclSymbols(path, language string, decl *ast.GenDecl, fileset *token.FileSet, lines []string) []Symbol {
+	var out []Symbol
 	for _, spec := range decl.Specs {
 		switch spec := spec.(type) {
 		case *ast.TypeSpec:
@@ -58,7 +58,7 @@ func goGenDeclSymbols(path, language string, decl *ast.GenDecl, fileset *token.F
 	return out
 }
 
-func goSymbol(path, language, kind, name string, namePos, signatureStart, signatureEnd token.Pos, fileset *token.FileSet, lines []string) symbol {
+func goSymbol(path, language, kind, name string, namePos, signatureStart, signatureEnd token.Pos, fileset *token.FileSet, lines []string) Symbol {
 	position := fileset.Position(namePos)
 	signature := goSignature(fileset, signatureStart, signatureEnd, lines)
 	return buildSymbol(path, language, kind, name, position.Line, position.Column, signature, lines)
