@@ -155,6 +155,25 @@ type fileMetrics struct {
 	symbolCount  int
 }
 
+type fileIndex struct {
+	path      string
+	language  string
+	extension string
+	size      int64
+	mtime     int64
+	sha1      string
+	text      string
+	lines     []string
+	symbols   []symbol
+	metrics   fileMetrics
+}
+
+type indexedFileState struct {
+	sha1  string
+	size  int64
+	mtime int64
+}
+
 type indexLock struct {
 	path string
 }
@@ -288,6 +307,8 @@ func run(args []string) error {
 		return cmdInit(args[1:])
 	case "rebuild":
 		return cmdRebuild(args[1:])
+	case "update":
+		return cmdUpdate(args[1:])
 	case "defs":
 		return cmdDefs(args[1:])
 	case "files":
@@ -309,7 +330,7 @@ func run(args []string) error {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: code-index <path|init|rebuild|defs|files|sql|show|stats|metrics|status> [options]")
+	fmt.Fprintln(os.Stderr, "usage: code-index <path|init|rebuild|update|defs|files|sql|show|stats|metrics|status> [options]")
 }
 
 func cmdPath(args []string) error {
@@ -422,6 +443,10 @@ func cmdRebuild(args []string) error {
 	return runRebuild(args)
 }
 
+func cmdUpdate(args []string) error {
+	return runUpdate(args)
+}
+
 func runRebuild(args []string) error {
 	flags := flag.NewFlagSet("rebuild", flag.ExitOnError)
 	dbPath := flags.String("db", "", "database path")
@@ -458,7 +483,7 @@ func runRebuild(args []string) error {
 	lock, err := acquireIndexLock(db, "rebuild", root)
 	if err != nil {
 		if isIndexLocked(err) {
-			fmt.Fprintf(os.Stderr, "index rebuild already in progress; skipped: %s\n", db)
+			printLockSkipped(db)
 			return nil
 		}
 		return err
@@ -495,84 +520,17 @@ func runRebuild(args []string) error {
 	nextFileID := 1
 	nextSymbolID := 1
 	err = walkSourceFiles(root, ignored, *maxBytes, func(path string, info fs.FileInfo) error {
-		text, err := readText(path, *maxBytes)
+		index, err := scanFileIndex(root, path, info, *maxBytes)
 		if err != nil {
 			return nil
 		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return nil
-		}
-		rel = filepath.ToSlash(rel)
-		language := detectLanguage(path)
-		lines := splitLines(text)
-		sha := sha1Hex(text)
-		writeSQL(
-			writer,
-			"insert into files(id, path, language, extension, size, mtime, sha1) values(%d, %s, %s, %s, %d, %d, %s);\n",
-			nextFileID,
-			quote(rel),
-			nullableQuote(language),
-			quote(strings.ToLower(filepath.Ext(path))),
-			info.Size(),
-			info.ModTime().Unix(),
-			quote(sha),
-		)
-		for index, line := range lines {
-			writeSQL(writer, "insert into lines(file_id, line, text) values(%d, %d, %s);\n", nextFileID, index+1, quote(line))
-		}
-		symbols := extractSymbols(rel, language, lines)
-		metrics := computeFileMetrics(language, lines, len(symbols))
-		writeSQL(
-			writer,
-			"insert into file_metrics(file_id, path, language, line_count, blank_lines, comment_lines, code_lines, symbol_count) values(%d, %s, %s, %d, %d, %d, %d, %d);\n",
-			nextFileID,
-			quote(rel),
-			nullableQuote(language),
-			metrics.lineCount,
-			metrics.blankLines,
-			metrics.commentLines,
-			metrics.codeLines,
-			metrics.symbolCount,
-		)
-		for _, sym := range symbols {
-			writeSQL(
-				writer,
-				"insert into symbols(id, file_id, path, language, kind, name, line, column, signature, context) values(%d, %d, %s, %s, %s, %s, %d, %d, %s, %s);\n",
-				nextSymbolID,
-				nextFileID,
-				quote(sym.path),
-				nullableQuote(sym.language),
-				quote(sym.kind),
-				quote(sym.name),
-				sym.line,
-				sym.column,
-				quote(sym.signature),
-				quote(sym.context),
-			)
-			if fts {
-				writeSQL(
-					writer,
-					"insert into symbols_fts(name, kind, language, path, signature, context) values(%s, %s, %s, %s, %s, %s);\n",
-					quote(sym.name),
-					quote(sym.kind),
-					nullableQuote(sym.language),
-					quote(sym.path),
-					quote(sym.signature),
-					quote(sym.context),
-				)
-			}
-			nextSymbolID++
-		}
-		if fts {
-			writeSQL(writer, "insert into files_fts(path, language, content) values(%s, %s, %s);\n", quote(rel), nullableQuote(language), quote(text))
-		}
+		writeFileIndexInsertSQL(writer, index, fts, nextFileID, &nextSymbolID)
 		fileCount++
-		symbolCount += len(symbols)
-		lineCount += len(lines)
-		codeLineCount += metrics.codeLines
-		commentLineCount += metrics.commentLines
-		blankLineCount += metrics.blankLines
+		symbolCount += len(index.symbols)
+		lineCount += len(index.lines)
+		codeLineCount += index.metrics.codeLines
+		commentLineCount += index.metrics.commentLines
+		blankLineCount += index.metrics.blankLines
 		nextFileID++
 		return nil
 	})
@@ -594,6 +552,140 @@ func runRebuild(args []string) error {
 	fmt.Printf("db: %s\n", db)
 	fmt.Printf("root: %s\n", root)
 	fmt.Printf("files: %d\n", fileCount)
+	fmt.Printf("symbols: %d\n", symbolCount)
+	fmt.Printf("lines: %d\n", lineCount)
+	fmt.Printf("code_lines: %d\n", codeLineCount)
+	fmt.Printf("comment_lines: %d\n", commentLineCount)
+	fmt.Printf("blank_lines: %d\n", blankLineCount)
+	fmt.Printf("fts5: %s\n", yesNo(fts))
+	return nil
+}
+
+func runUpdate(args []string) error {
+	flags := flag.NewFlagSet("update", flag.ExitOnError)
+	dbPath := flags.String("db", "", "database path")
+	maxBytes := flags.Int64("max-bytes", 1_000_000, "skip files larger than this")
+	var extraIgnored repeatedFlag
+	flags.Var(&extraIgnored, "ignore-dir", "extra directory name to ignore")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 1 {
+		return errors.New("usage: code-index update [--db DB] [--max-bytes N] ROOT")
+	}
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		return errors.New("sqlite3 command not found")
+	}
+	root, err := filepath.Abs(flags.Arg(0))
+	if err != nil {
+		return err
+	}
+	info, err := os.Stat(root)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("not a directory: %s", root)
+	}
+	db := *dbPath
+	if db == "" {
+		db = defaultDBPath(root)
+	}
+	if !fileExists(db) {
+		if _, locked, err := readIndexLock(db); err != nil {
+			return err
+		} else if locked {
+			printLockSkipped(db)
+			return nil
+		}
+		return fmt.Errorf("index not found: %s; run init or rebuild first, or pass --db", db)
+	}
+	lock, err := acquireIndexLock(db, "update", root)
+	if err != nil {
+		if isIndexLocked(err) {
+			printLockSkipped(db)
+			return nil
+		}
+		return err
+	}
+	defer lock.release()
+	existing, err := loadIndexedFileStates(db)
+	if err != nil {
+		return err
+	}
+	fts, err := dbHasFTS5Tables(db)
+	if err != nil {
+		return err
+	}
+	writer, wait, err := sqliteWriter(db)
+	if err != nil {
+		return err
+	}
+	writerOK := false
+	defer func() {
+		if !writerOK {
+			_ = writer.Close()
+			_ = wait()
+		}
+	}()
+	writeSQL(writer, ".bail on\n")
+	writeSQL(writer, ".timeout 5000\n")
+	writeSQL(writer, "begin immediate;\n")
+	writeSQL(writer, "insert or replace into meta(key, value) values(%s, %s);\n", quote("root"), quote(root))
+	ignored := cloneIgnored(extraIgnored)
+	seen := map[string]bool{}
+	var added, updated, deleted, unchanged int
+	var symbolCount, lineCount int
+	var codeLineCount, commentLineCount, blankLineCount int
+	err = walkSourceFiles(root, ignored, *maxBytes, func(path string, info fs.FileInfo) error {
+		index, err := scanFileIndex(root, path, info, *maxBytes)
+		if err != nil {
+			return nil
+		}
+		seen[index.path] = true
+		state, existed := existing[index.path]
+		if existed && state.sha1 == index.sha1 {
+			unchanged++
+			return nil
+		}
+		if existed {
+			updated++
+		} else {
+			added++
+		}
+		writeFileIndexDeleteSQL(writer, index.path, fts)
+		writeFileIndexInsertSQL(writer, index, fts, 0, nil)
+		symbolCount += len(index.symbols)
+		lineCount += len(index.lines)
+		codeLineCount += index.metrics.codeLines
+		commentLineCount += index.metrics.commentLines
+		blankLineCount += index.metrics.blankLines
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	for rel := range existing {
+		if seen[rel] {
+			continue
+		}
+		writeFileIndexDeleteSQL(writer, rel, fts)
+		deleted++
+	}
+	writeSQL(writer, "commit;\n")
+	if err := writer.Close(); err != nil {
+		return err
+	}
+	if err := wait(); err != nil {
+		return err
+	}
+	writerOK = true
+	fmt.Printf("db: %s\n", db)
+	fmt.Printf("root: %s\n", root)
+	fmt.Printf("added: %d\n", added)
+	fmt.Printf("updated: %d\n", updated)
+	fmt.Printf("deleted: %d\n", deleted)
+	fmt.Printf("unchanged: %d\n", unchanged)
 	fmt.Printf("symbols: %d\n", symbolCount)
 	fmt.Printf("lines: %d\n", lineCount)
 	fmt.Printf("code_lines: %d\n", codeLineCount)
@@ -967,6 +1059,15 @@ func queryLockNotice(db string) (string, error) {
 	return "", nil
 }
 
+func printLockSkipped(db string) {
+	info, locked, err := readIndexLock(db)
+	if err != nil || !locked {
+		fmt.Fprintf(os.Stderr, "index operation already in progress; skipped: %s\n", db)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "index %s already in progress; skipped: %s\n", info.operationName(), db)
+}
+
 func createTempDBPath(db string) (string, error) {
 	file, err := os.CreateTemp(filepath.Dir(db), "."+filepath.Base(db)+".*.tmp")
 	if err != nil {
@@ -1046,6 +1147,54 @@ func sqliteWriter(db string) (io.WriteCloser, func() error, error) {
 		return nil, nil, err
 	}
 	return stdin, cmd.Wait, nil
+}
+
+func sqliteQueryOutput(db, sql string) (string, error) {
+	cmd := exec.Command("sqlite3", "-batch", "-noheader", "-separator", "\t", db, sql)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("sqlite3 query failed: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return string(out), nil
+}
+
+func loadIndexedFileStates(db string) (map[string]indexedFileState, error) {
+	out, err := sqliteQueryOutput(db, "select path, sha1, size, mtime from files order by path;")
+	if err != nil {
+		return nil, err
+	}
+	states := map[string]indexedFileState{}
+	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		if line == "" {
+			continue
+		}
+		cols := strings.Split(line, "\t")
+		if len(cols) != 4 {
+			return nil, fmt.Errorf("unexpected files row from sqlite3: %q", line)
+		}
+		size, err := strconv.ParseInt(cols[2], 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		mtime, err := strconv.ParseInt(cols[3], 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		states[cols[0]] = indexedFileState{
+			sha1:  cols[1],
+			size:  size,
+			mtime: mtime,
+		}
+	}
+	return states, nil
+}
+
+func dbHasFTS5Tables(db string) (bool, error) {
+	out, err := sqliteQueryOutput(db, "select count(*) from sqlite_master where type = 'table' and name in ('files_fts', 'symbols_fts');")
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(out) == "2", nil
 }
 
 func writeSchema(w io.Writer, fts bool) {
@@ -1173,6 +1322,137 @@ func walkSourceFiles(root string, ignored map[string]bool, maxBytes int64, fn fu
 		}
 		return fn(path, info)
 	})
+}
+
+func scanFileIndex(root, path string, info fs.FileInfo, maxBytes int64) (fileIndex, error) {
+	text, err := readText(path, maxBytes)
+	if err != nil {
+		return fileIndex{}, err
+	}
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return fileIndex{}, err
+	}
+	rel = filepath.ToSlash(rel)
+	language := detectLanguage(path)
+	lines := splitLines(text)
+	symbols := extractSymbols(rel, language, lines)
+	metrics := computeFileMetrics(language, lines, len(symbols))
+	return fileIndex{
+		path:      rel,
+		language:  language,
+		extension: strings.ToLower(filepath.Ext(path)),
+		size:      info.Size(),
+		mtime:     info.ModTime().Unix(),
+		sha1:      sha1Hex(text),
+		text:      text,
+		lines:     lines,
+		symbols:   symbols,
+		metrics:   metrics,
+	}, nil
+}
+
+func writeFileIndexDeleteSQL(w io.Writer, path string, fts bool) {
+	if fts {
+		writeSQL(w, "delete from files_fts where path = %s;\n", quote(path))
+		writeSQL(w, "delete from symbols_fts where path = %s;\n", quote(path))
+	}
+	writeSQL(w, "delete from lines where file_id in (select id from files where path = %s);\n", quote(path))
+	writeSQL(w, "delete from symbols where path = %s;\n", quote(path))
+	writeSQL(w, "delete from file_metrics where path = %s;\n", quote(path))
+	writeSQL(w, "delete from files where path = %s;\n", quote(path))
+}
+
+func writeFileIndexInsertSQL(w io.Writer, index fileIndex, fts bool, fileID int, symbolID *int) {
+	fileIDExpr := "(select id from files where path = " + quote(index.path) + ")"
+	if fileID > 0 {
+		writeSQL(
+			w,
+			"insert into files(id, path, language, extension, size, mtime, sha1) values(%d, %s, %s, %s, %d, %d, %s);\n",
+			fileID,
+			quote(index.path),
+			nullableQuote(index.language),
+			quote(index.extension),
+			index.size,
+			index.mtime,
+			quote(index.sha1),
+		)
+		fileIDExpr = strconv.Itoa(fileID)
+	} else {
+		writeSQL(
+			w,
+			"insert into files(path, language, extension, size, mtime, sha1) values(%s, %s, %s, %d, %d, %s);\n",
+			quote(index.path),
+			nullableQuote(index.language),
+			quote(index.extension),
+			index.size,
+			index.mtime,
+			quote(index.sha1),
+		)
+	}
+	for lineIndex, line := range index.lines {
+		writeSQL(w, "insert into lines(file_id, line, text) values(%s, %d, %s);\n", fileIDExpr, lineIndex+1, quote(line))
+	}
+	writeSQL(
+		w,
+		"insert into file_metrics(file_id, path, language, line_count, blank_lines, comment_lines, code_lines, symbol_count) values(%s, %s, %s, %d, %d, %d, %d, %d);\n",
+		fileIDExpr,
+		quote(index.path),
+		nullableQuote(index.language),
+		index.metrics.lineCount,
+		index.metrics.blankLines,
+		index.metrics.commentLines,
+		index.metrics.codeLines,
+		index.metrics.symbolCount,
+	)
+	for _, sym := range index.symbols {
+		if symbolID != nil {
+			writeSQL(
+				w,
+				"insert into symbols(id, file_id, path, language, kind, name, line, column, signature, context) values(%d, %s, %s, %s, %s, %s, %d, %d, %s, %s);\n",
+				*symbolID,
+				fileIDExpr,
+				quote(sym.path),
+				nullableQuote(sym.language),
+				quote(sym.kind),
+				quote(sym.name),
+				sym.line,
+				sym.column,
+				quote(sym.signature),
+				quote(sym.context),
+			)
+			*symbolID = *symbolID + 1
+		} else {
+			writeSQL(
+				w,
+				"insert into symbols(file_id, path, language, kind, name, line, column, signature, context) values(%s, %s, %s, %s, %s, %d, %d, %s, %s);\n",
+				fileIDExpr,
+				quote(sym.path),
+				nullableQuote(sym.language),
+				quote(sym.kind),
+				quote(sym.name),
+				sym.line,
+				sym.column,
+				quote(sym.signature),
+				quote(sym.context),
+			)
+		}
+		if fts {
+			writeSQL(
+				w,
+				"insert into symbols_fts(name, kind, language, path, signature, context) values(%s, %s, %s, %s, %s, %s);\n",
+				quote(sym.name),
+				quote(sym.kind),
+				nullableQuote(sym.language),
+				quote(sym.path),
+				quote(sym.signature),
+				quote(sym.context),
+			)
+		}
+	}
+	if fts {
+		writeSQL(w, "insert into files_fts(path, language, content) values(%s, %s, %s);\n", quote(index.path), nullableQuote(index.language), quote(index.text))
+	}
 }
 
 func readText(path string, maxBytes int64) (string, error) {

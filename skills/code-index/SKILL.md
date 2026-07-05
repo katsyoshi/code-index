@@ -31,10 +31,10 @@ TOOL="$(command -v code-index)"
 export CODE_INDEX_CACHE_DIR="${CODE_INDEX_CACHE_DIR:-/tmp/code-index}"
 ```
 
-4. Build or refresh the index before substantial search work. Prefer `rebuild`; if the selected fallback tool is old and does not support it, use `build`:
+4. Build or refresh the index before substantial search work. Prefer `update` when an index already exists, and fall back to `rebuild` for first use:
 
 ```bash
-"$TOOL" rebuild "$PWD" || "$TOOL" build "$PWD"
+"$TOOL" update "$PWD" || "$TOOL" rebuild "$PWD"
 ```
 
 5. Check status when lock or freshness may matter:
@@ -65,7 +65,7 @@ If `status` is unsupported, continue with query commands and rely on rebuild out
 "$TOOL" show --root "$PWD" --line 42 lib/config.rb
 ```
 
-9. Rebuild the index after editing files that affect search results.
+9. Run `update` after editing files that affect search results. Use `rebuild` after tool upgrades, schema changes, or option changes that should refresh every file.
 
 ## Search Policy
 
@@ -87,8 +87,11 @@ Common commands:
 # Initialize an empty schema when explicitly needed.
 "$TOOL" init "$PWD"
 
-# Atomic full rebuild. Current CLI skips successfully if another rebuild holds the lock.
+# Atomic full rebuild. Current CLI skips successfully if another operation holds the lock.
 "$TOOL" rebuild "$PWD"
+
+# Incrementally refresh changed and deleted files.
+"$TOOL" update "$PWD"
 
 # Show index status and lock state.
 "$TOOL" status --root "$PWD"

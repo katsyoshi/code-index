@@ -40,6 +40,7 @@ jobs:
           /tmp/code-index-bin status --db "$tmpdir/init.sqlite"
           /tmp/code-index-bin stats --db "$tmpdir/init.sqlite"
           /tmp/code-index-bin rebuild .
+          /tmp/code-index-bin update .
           /tmp/code-index-bin status --root .
           /tmp/code-index-bin stats --root .
           /tmp/code-index-bin metrics --root .

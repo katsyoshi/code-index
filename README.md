@@ -43,6 +43,14 @@ Rebuild an index atomically:
 
 If another `init` or `rebuild` is already running for the same database, `rebuild` skips and exits successfully.
 
+Update an existing index incrementally:
+
+```sh
+./code-index update /path/to/repo
+```
+
+`update` refreshes changed files and removes deleted or newly ignored files. It requires an existing database, so run `init` or `rebuild` first.
+
 Show index status:
 
 ```sh
@@ -85,7 +93,7 @@ The default database is stored under `CODE_INDEX_CACHE_DIR` when set. Otherwise 
 
 ## Git Hooks
 
-You can rebuild the local index automatically after branch checkouts and merges. These hooks are optional and only run when `code-index` is available on `PATH`.
+You can refresh the local index automatically after branch checkouts and merges. These hooks are optional and only run when `code-index` is available on `PATH`.
 
 Refresh the index after switching branches:
 
@@ -99,7 +107,8 @@ root="$(git rev-parse --show-toplevel)" || exit 0
 command -v code-index >/dev/null 2>&1 || exit 0
 
 (
-  code-index rebuild "$root" >/dev/null 2>&1
+  code-index update "$root" >/dev/null 2>&1 ||
+    code-index rebuild "$root" >/dev/null 2>&1
 ) &
 EOF
 chmod +x .git/hooks/post-checkout
@@ -114,13 +123,14 @@ root="$(git rev-parse --show-toplevel)" || exit 0
 command -v code-index >/dev/null 2>&1 || exit 0
 
 (
-  code-index rebuild "$root" >/dev/null 2>&1
+  code-index update "$root" >/dev/null 2>&1 ||
+    code-index rebuild "$root" >/dev/null 2>&1
 ) &
 EOF
 chmod +x .git/hooks/post-merge
 ```
 
-The examples run in the background so Git commands do not wait for indexing. During `init` and `rebuild`, `code-index` writes a `.lock` file next to the target database. Queries keep using the previous index until `rebuild` finishes and replaces it, and print a warning to stderr while the lock is present. If no previous index exists yet, queries fail with a message that initialization or rebuilding is still in progress.
+The examples run in the background so Git commands do not wait for indexing. During `init`, `rebuild`, and `update`, `code-index` writes a `.lock` file next to the target database. Queries keep using a consistent SQLite snapshot and print a warning to stderr while the lock is present. If no previous index exists yet, queries fail with a message that initialization or rebuilding is still in progress.
 
 ## Schema
 

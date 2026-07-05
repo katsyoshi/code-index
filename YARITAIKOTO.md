@@ -8,10 +8,9 @@
   - stale lock の扱いを決める。
   - `status` に schema version, indexed_at, branch/head/dirty などを増やすか検討する。
 
-- `update` を追加するか検討する
-  - 既存 DB を差分更新するコマンド。
-  - 変更・削除・rename・ignore 設定変更・schema 変更の扱いを決める。
-  - `rebuild` は full rebuild、`update` は incremental only という分担にする。
+- `update` の運用を詰める
+  - rename・ignore 設定変更・schema 変更の扱いを決める。
+  - `rebuild` は full rebuild、`update` は incremental refresh という分担を維持する。
   - update/partial build を入れるタイミングで、DB 内の管理テーブルも検討する。
     - `config`: `max_bytes`, `ignore_dirs`, enabled components など。
     - `components`: `files`, `lines`, `symbols`, `metrics`, `fts` の状態。
@@ -67,6 +66,10 @@
 ## やった
 
 - `code-index` に名前を統一した。
+- `update` コマンドを追加した。
+  - 既存 DB の変更ファイルを差し替える。
+  - 削除されたファイル、ignore 対象になったファイルを DB から削除する。
+  - `init` 済みの空DBにも投入できる。
 - `file_metrics` テーブルと `metrics` コマンドを追加した。
 - GitHub Actions CI を追加した。
   - `go test ./...`

@@ -169,6 +169,29 @@ func TestRebuildSkipsWhenLocked(t *testing.T) {
 	}
 }
 
+func TestUpdateSkipsWhenLockedWithoutExistingDB(t *testing.T) {
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		t.Skip("sqlite3 command not found")
+	}
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	db := filepath.Join(t.TempDir(), "index.sqlite")
+	lock, err := acquireIndexLock(db, "init", root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.release()
+
+	if err := run([]string{"update", "--db", db, root}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(db); !os.IsNotExist(err) {
+		t.Fatalf("db exists after skipped update or returned unexpected error: %v", err)
+	}
+}
+
 func TestStatusReportsLock(t *testing.T) {
 	db := filepath.Join(t.TempDir(), "index.sqlite")
 	if err := os.WriteFile(db, []byte("old"), 0o644); err != nil {
@@ -239,5 +262,71 @@ func TestRebuildCommandCreatesSQLiteIndex(t *testing.T) {
 	}
 	if strings.TrimSpace(string(out)) != "1" {
 		t.Fatalf("main symbol count = %q, want 1", out)
+	}
+}
+
+func TestUpdateCommandAppliesFileChanges(t *testing.T) {
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		t.Skip("sqlite3 command not found")
+	}
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n\nfunc oldName() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "stale.rb"), []byte("def gone\nend\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	db := filepath.Join(t.TempDir(), "index.sqlite")
+	if err := run([]string{"rebuild", "--db", db, root}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n\nfunc nextName() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(root, "stale.rb")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "added.py"), []byte("def added():\n    pass\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := run([]string{"update", "--db", db, root}); err != nil {
+		t.Fatal(err)
+	}
+	assertSQLiteValue(t, db, "select count(*) from symbols where name = 'oldName';", "0")
+	assertSQLiteValue(t, db, "select count(*) from symbols where name = 'nextName';", "1")
+	assertSQLiteValue(t, db, "select count(*) from symbols where name = 'gone';", "0")
+	assertSQLiteValue(t, db, "select count(*) from symbols where name = 'added';", "1")
+	assertSQLiteValue(t, db, "select count(*) from files where path = 'stale.rb';", "0")
+	assertSQLiteValue(t, db, "select count(*) from files where path = 'added.py';", "1")
+}
+
+func TestUpdateCommandIndexesInitializedDB(t *testing.T) {
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		t.Skip("sqlite3 command not found")
+	}
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	db := filepath.Join(t.TempDir(), "index.sqlite")
+	if err := run([]string{"init", "--db", db, root}); err != nil {
+		t.Fatal(err)
+	}
+	if err := run([]string{"update", "--db", db, root}); err != nil {
+		t.Fatal(err)
+	}
+	assertSQLiteValue(t, db, "select count(*) from symbols where name = 'main';", "1")
+}
+
+func assertSQLiteValue(t *testing.T, db, sql, want string) {
+	t.Helper()
+	out, err := exec.Command("sqlite3", "-batch", "-noheader", db, sql).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(string(out)); got != want {
+		t.Fatalf("sqlite value for %q = %q, want %q", sql, got, want)
 	}
 }
