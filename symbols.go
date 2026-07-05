@@ -22,6 +22,10 @@ type symbol struct {
 	context   string
 }
 
+type symbolExtractor interface {
+	extract(path, language string, lines []string) ([]symbol, bool)
+}
+
 var symbolPatterns = map[string][]symbolSpec{
 	"python": {
 		spec(`^\s*(?:async\s+)?def\s+([A-Za-z_]\w*)\s*\(`, "function"),
@@ -109,6 +113,10 @@ var symbolPatterns = map[string][]symbolSpec{
 	},
 }
 
+var languageSymbolExtractors = map[string]symbolExtractor{
+	"go": goSymbolExtractor{},
+}
+
 var skipSymbolNames = map[string]bool{
 	"catch":  true,
 	"else":   true,
@@ -124,9 +132,21 @@ func spec(pattern, kind string) symbolSpec {
 }
 
 func extractSymbols(path, language string, lines []string) []symbol {
+	if extractor, ok := languageSymbolExtractors[language]; ok {
+		if symbols, ok := extractor.extract(path, language, lines); ok {
+			return symbols
+		}
+	}
+	symbols, _ := regexSymbolExtractor{}.extract(path, language, lines)
+	return symbols
+}
+
+type regexSymbolExtractor struct{}
+
+func (regexSymbolExtractor) extract(path, language string, lines []string) ([]symbol, bool) {
 	patterns := symbolPatterns[language]
 	if len(patterns) == 0 {
-		return nil
+		return nil, true
 	}
 	var out []symbol
 	seen := map[string]bool{}
@@ -145,26 +165,34 @@ func extractSymbols(path, language string, lines []string) []symbol {
 				continue
 			}
 			seen[key] = true
-			start := i - 2
-			if start < 0 {
-				start = 0
-			}
-			end := i + 3
-			if end > len(lines) {
-				end = len(lines)
-			}
-			out = append(out, symbol{
-				path:      path,
-				language:  language,
-				kind:      pattern.kind,
-				name:      name,
-				line:      i + 1,
-				column:    match[2] + 1,
-				signature: truncate(strings.TrimSpace(line), 500),
-				context:   truncate(strings.Join(lines[start:end], "\n"), 2000),
-			})
+			out = append(out, buildSymbol(path, language, pattern.kind, name, i+1, match[2]+1, line, lines))
 			break
 		}
 	}
-	return out
+	return out, true
+}
+
+func buildSymbol(path, language, kind, name string, line, column int, signature string, lines []string) symbol {
+	return symbol{
+		path:      path,
+		language:  language,
+		kind:      kind,
+		name:      name,
+		line:      line,
+		column:    column,
+		signature: truncate(strings.TrimSpace(signature), 500),
+		context:   symbolContext(lines, line),
+	}
+}
+
+func symbolContext(lines []string, line int) string {
+	start := line - 3
+	if start < 0 {
+		start = 0
+	}
+	end := line + 2
+	if end > len(lines) {
+		end = len(lines)
+	}
+	return truncate(strings.Join(lines[start:end], "\n"), 2000)
 }
