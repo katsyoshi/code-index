@@ -1,7 +1,7 @@
 package main
 
 import (
-	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"flag"
@@ -156,22 +156,22 @@ type fileMetrics struct {
 }
 
 type fileIndex struct {
-	path      string
-	language  string
-	extension string
-	size      int64
-	mtime     int64
-	sha1      string
-	text      string
-	lines     []string
-	symbols   []symbol
-	metrics   fileMetrics
+	path        string
+	language    string
+	extension   string
+	size        int64
+	mtime       int64
+	contentHash string
+	text        string
+	lines       []string
+	symbols     []symbol
+	metrics     fileMetrics
 }
 
 type indexedFileState struct {
-	sha1  string
-	size  int64
-	mtime int64
+	contentHash string
+	size        int64
+	mtime       int64
 }
 
 type indexLock struct {
@@ -283,6 +283,8 @@ var skipSymbolNames = map[string]bool{
 }
 
 var errIndexLocked = errors.New("index locked")
+
+const contentHashAlgorithm = "sha256"
 
 func spec(pattern, kind string) symbolSpec {
 	return symbolSpec{re: regexp.MustCompile(pattern), kind: kind}
@@ -415,6 +417,7 @@ func cmdInit(args []string) error {
 	writeSchema(writer, fts)
 	writeSQL(writer, "insert into meta(key, value) values(%s, %s);\n", quote("root"), quote(root))
 	writeSQL(writer, "insert into meta(key, value) values(%s, %s);\n", quote("fts5"), quote(boolText(fts)))
+	writeSQL(writer, "insert into meta(key, value) values(%s, %s);\n", quote("hash_algorithm"), quote(contentHashAlgorithm))
 	writeSQL(writer, "commit;\n")
 	if err := writer.Close(); err != nil {
 		return err
@@ -435,6 +438,7 @@ func cmdInit(args []string) error {
 	fmt.Printf("code_lines: 0\n")
 	fmt.Printf("comment_lines: 0\n")
 	fmt.Printf("blank_lines: 0\n")
+	fmt.Printf("hash_algorithm: %s\n", contentHashAlgorithm)
 	fmt.Printf("fts5: %s\n", yesNo(fts))
 	return nil
 }
@@ -514,6 +518,7 @@ func runRebuild(args []string) error {
 	writeSchema(writer, fts)
 	writeSQL(writer, "insert into meta(key, value) values(%s, %s);\n", quote("root"), quote(root))
 	writeSQL(writer, "insert into meta(key, value) values(%s, %s);\n", quote("fts5"), quote(boolText(fts)))
+	writeSQL(writer, "insert into meta(key, value) values(%s, %s);\n", quote("hash_algorithm"), quote(contentHashAlgorithm))
 	ignored := cloneIgnored(extraIgnored)
 	var fileCount, symbolCount, lineCount int
 	var codeLineCount, commentLineCount, blankLineCount int
@@ -557,6 +562,7 @@ func runRebuild(args []string) error {
 	fmt.Printf("code_lines: %d\n", codeLineCount)
 	fmt.Printf("comment_lines: %d\n", commentLineCount)
 	fmt.Printf("blank_lines: %d\n", blankLineCount)
+	fmt.Printf("hash_algorithm: %s\n", contentHashAlgorithm)
 	fmt.Printf("fts5: %s\n", yesNo(fts))
 	return nil
 }
@@ -632,6 +638,7 @@ func runUpdate(args []string) error {
 	writeSQL(writer, ".timeout 5000\n")
 	writeSQL(writer, "begin immediate;\n")
 	writeSQL(writer, "insert or replace into meta(key, value) values(%s, %s);\n", quote("root"), quote(root))
+	writeSQL(writer, "insert or replace into meta(key, value) values(%s, %s);\n", quote("hash_algorithm"), quote(contentHashAlgorithm))
 	ignored := cloneIgnored(extraIgnored)
 	seen := map[string]bool{}
 	var added, updated, deleted, unchanged int
@@ -644,7 +651,7 @@ func runUpdate(args []string) error {
 		}
 		seen[index.path] = true
 		state, existed := existing[index.path]
-		if existed && state.sha1 == index.sha1 {
+		if existed && state.contentHash == index.contentHash {
 			unchanged++
 			return nil
 		}
@@ -691,6 +698,7 @@ func runUpdate(args []string) error {
 	fmt.Printf("code_lines: %d\n", codeLineCount)
 	fmt.Printf("comment_lines: %d\n", commentLineCount)
 	fmt.Printf("blank_lines: %d\n", blankLineCount)
+	fmt.Printf("hash_algorithm: %s\n", contentHashAlgorithm)
 	fmt.Printf("fts5: %s\n", yesNo(fts))
 	return nil
 }
@@ -827,6 +835,7 @@ union all select 'lines', cast(count(*) as text) from lines
 union all select 'code_lines', cast(coalesce(sum(code_lines), 0) as text) from file_metrics
 union all select 'comment_lines', cast(coalesce(sum(comment_lines), 0) as text) from file_metrics
 union all select 'blank_lines', cast(coalesce(sum(blank_lines), 0) as text) from file_metrics
+union all select 'hash_algorithm', value from meta where key = 'hash_algorithm'
 union all select 'fts5', value from meta where key = 'fts5';`
 	return runSQLitePrint(requiredDB(*db, *root), sql)
 }
@@ -928,7 +937,7 @@ func (r *repeatedFlag) Set(value string) error {
 }
 
 func defaultDBPath(root string) string {
-	sum := sha1.Sum([]byte(root))
+	sum := sha256.Sum256([]byte(root))
 	return filepath.Join(defaultCacheDir(), hex.EncodeToString(sum[:])[:16]+".sqlite")
 }
 
@@ -1159,7 +1168,7 @@ func sqliteQueryOutput(db, sql string) (string, error) {
 }
 
 func loadIndexedFileStates(db string) (map[string]indexedFileState, error) {
-	out, err := sqliteQueryOutput(db, "select path, sha1, size, mtime from files order by path;")
+	out, err := sqliteQueryOutput(db, "select path, content_hash, size, mtime from files order by path;")
 	if err != nil {
 		return nil, err
 	}
@@ -1181,9 +1190,9 @@ func loadIndexedFileStates(db string) (map[string]indexedFileState, error) {
 			return nil, err
 		}
 		states[cols[0]] = indexedFileState{
-			sha1:  cols[1],
-			size:  size,
-			mtime: mtime,
+			contentHash: cols[1],
+			size:        size,
+			mtime:       mtime,
 		}
 	}
 	return states, nil
@@ -1211,7 +1220,7 @@ create table files (
   extension text,
   size integer not null,
   mtime integer not null,
-  sha1 text not null
+  content_hash text not null
 );
 create table symbols (
   id integer primary key,
@@ -1339,16 +1348,16 @@ func scanFileIndex(root, path string, info fs.FileInfo, maxBytes int64) (fileInd
 	symbols := extractSymbols(rel, language, lines)
 	metrics := computeFileMetrics(language, lines, len(symbols))
 	return fileIndex{
-		path:      rel,
-		language:  language,
-		extension: strings.ToLower(filepath.Ext(path)),
-		size:      info.Size(),
-		mtime:     info.ModTime().Unix(),
-		sha1:      sha1Hex(text),
-		text:      text,
-		lines:     lines,
-		symbols:   symbols,
-		metrics:   metrics,
+		path:        rel,
+		language:    language,
+		extension:   strings.ToLower(filepath.Ext(path)),
+		size:        info.Size(),
+		mtime:       info.ModTime().Unix(),
+		contentHash: contentHash(text),
+		text:        text,
+		lines:       lines,
+		symbols:     symbols,
+		metrics:     metrics,
 	}, nil
 }
 
@@ -1368,26 +1377,26 @@ func writeFileIndexInsertSQL(w io.Writer, index fileIndex, fts bool, fileID int,
 	if fileID > 0 {
 		writeSQL(
 			w,
-			"insert into files(id, path, language, extension, size, mtime, sha1) values(%d, %s, %s, %s, %d, %d, %s);\n",
+			"insert into files(id, path, language, extension, size, mtime, content_hash) values(%d, %s, %s, %s, %d, %d, %s);\n",
 			fileID,
 			quote(index.path),
 			nullableQuote(index.language),
 			quote(index.extension),
 			index.size,
 			index.mtime,
-			quote(index.sha1),
+			quote(index.contentHash),
 		)
 		fileIDExpr = strconv.Itoa(fileID)
 	} else {
 		writeSQL(
 			w,
-			"insert into files(path, language, extension, size, mtime, sha1) values(%s, %s, %s, %d, %d, %s);\n",
+			"insert into files(path, language, extension, size, mtime, content_hash) values(%s, %s, %s, %d, %d, %s);\n",
 			quote(index.path),
 			nullableQuote(index.language),
 			quote(index.extension),
 			index.size,
 			index.mtime,
-			quote(index.sha1),
+			quote(index.contentHash),
 		)
 	}
 	for lineIndex, line := range index.lines {
@@ -1633,8 +1642,8 @@ func extractSymbols(path, language string, lines []string) []symbol {
 	return out
 }
 
-func sha1Hex(text string) string {
-	sum := sha1.Sum([]byte(text))
+func contentHash(text string) string {
+	sum := sha256.Sum256([]byte(text))
 	return hex.EncodeToString(sum[:])
 }
 

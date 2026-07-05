@@ -10,7 +10,7 @@
 - `extension`: file extension
 - `size`: byte size
 - `mtime`: filesystem modification time
-- `sha1`: content digest
+- `content_hash`: SHA-256 content digest
 
 `symbols`
 
