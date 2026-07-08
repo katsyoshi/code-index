@@ -441,18 +441,7 @@ func cmdDefs(args []string) error {
 	if *language != "" {
 		where += " and language = " + quote(*language)
 	}
-	sql := fmt.Sprintf(`select path, line, kind, name, language, signature
-from symbols
-where %s
-order by
-  case
-    when name = %s collate nocase then 0
-    when name like %s collate nocase then 1
-    else 2
-  end,
-  path,
-  line
-limit %d;`, where, quote(query), quote(query+"%"), *limit)
+	sql := formatEmbeddedSQL("defs.sql", where, quote(query), quote(query+"%"), *limit)
 	return runSQLitePrint(requiredDB(*db, *root), sql)
 }
 
@@ -473,11 +462,7 @@ func cmdFiles(args []string) error {
 	if *language != "" {
 		where += " and language = " + quote(*language)
 	}
-	sql := fmt.Sprintf(`select path, language, size
-from files
-where %s
-order by path
-limit %d;`, where, *limit)
+	sql := formatEmbeddedSQL("files.sql", where, *limit)
 	return runSQLitePrint(requiredDB(*db, *root), sql)
 }
 
@@ -524,17 +509,7 @@ func cmdShow(args []string) error {
 		start = 1
 	}
 	end := *line + *context
-	sql := fmt.Sprintf(`with target as (
-  select id, path
-  from files
-  where path = %s or path like %s
-  order by case when path = %s then 0 else 1 end, length(path)
-  limit 1
-)
-select target.path as path, lines.line as line, lines.text as text
-from lines join target on target.id = lines.file_id
-where lines.line between %d and %d
-order by lines.line;`, quote(path), quote("%"+path), quote(path), start, end)
+	sql := formatEmbeddedSQL("show.sql", quote(path), quote("%"+path), quote(path), start, end)
 	return runSQLitePrint(requiredDB(*db, *root), sql)
 }
 
