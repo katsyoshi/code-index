@@ -109,6 +109,39 @@ func TestIndexLockPreventsConcurrentBuilds(t *testing.T) {
 	}
 }
 
+func TestIndexLockReclaimsStaleLock(t *testing.T) {
+	db := filepath.Join(t.TempDir(), "index.sqlite")
+	if err := os.WriteFile(indexLockPath(db), []byte("operation=rebuild\nroot=/repo\npid=123\nstarted_at=2026-01-01T00:00:00Z\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := indexLockProcessRunning
+	indexLockProcessRunning = func(pid int) (bool, error) {
+		if pid != 123 {
+			t.Fatalf("pid = %d, want 123", pid)
+		}
+		return false, nil
+	}
+	defer func() {
+		indexLockProcessRunning = old
+	}()
+
+	lock, err := acquireIndexLock(db, "update", "/repo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.release()
+	info, locked, err := readIndexLock(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !locked {
+		t.Fatal("lock was not recreated")
+	}
+	if info.operation != "update" {
+		t.Fatalf("operation = %q, want update", info.operation)
+	}
+}
+
 func TestQueryLockNoticeUsesPreviousIndex(t *testing.T) {
 	db := filepath.Join(t.TempDir(), "index.sqlite")
 	if err := os.WriteFile(db, []byte("old"), 0o644); err != nil {
@@ -126,6 +159,34 @@ func TestQueryLockNoticeUsesPreviousIndex(t *testing.T) {
 	}
 	if !strings.Contains(notice, "rebuild") || !strings.Contains(notice, "using previous index") {
 		t.Fatalf("notice = %q, want rebuild warning with previous index", notice)
+	}
+}
+
+func TestQueryLockNoticeIgnoresStaleLock(t *testing.T) {
+	db := filepath.Join(t.TempDir(), "index.sqlite")
+	if err := os.WriteFile(db, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(indexLockPath(db), []byte("operation=rebuild\nroot=/repo\npid=123\nstarted_at=2026-01-01T00:00:00Z\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := indexLockProcessRunning
+	indexLockProcessRunning = func(pid int) (bool, error) {
+		return false, nil
+	}
+	defer func() {
+		indexLockProcessRunning = old
+	}()
+
+	notice, err := queryLockNotice(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if notice != "" {
+		t.Fatalf("notice = %q, want empty", notice)
+	}
+	if _, err := os.Stat(indexLockPath(db)); !os.IsNotExist(err) {
+		t.Fatalf("stale lock still exists or returned unexpected error: %v", err)
 	}
 }
 
@@ -229,6 +290,7 @@ func TestInitCommandCreatesEmptySQLiteIndexAndFailsIfExists(t *testing.T) {
 	assertMetaValue(t, db, "file_source", fileSource)
 	assertMetaValue(t, db, "hash_algorithm", contentHashAlgorithm)
 	assertMetaValue(t, db, "last_operation", "init")
+	assertSQLiteValue(t, db, "select count(*) from meta where key = 'indexed_at' and value != '';", "1")
 	assertSQLiteValue(t, db, "select count(*) from meta where key = 'updated_at' and value != '';", "1")
 	if _, err := os.Stat(indexLockPath(db)); !os.IsNotExist(err) {
 		t.Fatalf("lock file still exists or returned unexpected error: %v", err)
@@ -303,6 +365,12 @@ func TestRebuildStoresVCSRevision(t *testing.T) {
 
 	assertMetaValue(t, db, "vcs_revision", revision)
 	assertMetaValue(t, db, "vcs_ref", ref)
+	assertMetaValue(t, db, "vcs_head", revision)
+	assertMetaValue(t, db, "vcs_branch", ref)
+	assertMetaValue(t, db, "vcs_dirty", boolText(false))
+	if err := run([]string{"status", "--db", db}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestUpdateCommandAppliesFileChanges(t *testing.T) {

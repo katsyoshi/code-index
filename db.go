@@ -133,13 +133,15 @@ type metaPair struct {
 }
 
 func writeOperationMetaSQL(w io.Writer, root, operation string, fts bool) {
+	now := time.Now().UTC().Format(time.RFC3339)
 	pairs := []metaPair{
 		{"schema_version", schemaVersion},
 		{"root", root},
 		{"file_source", fileSource},
 		{"hash_algorithm", contentHashAlgorithm},
 		{"fts5", boolText(fts)},
-		{"updated_at", time.Now().UTC().Format(time.RFC3339)},
+		{"indexed_at", now},
+		{"updated_at", now},
 		{"last_operation", operation},
 	}
 	pairs = append(pairs, currentVCSMeta(root)...)

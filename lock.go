@@ -4,7 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -21,23 +23,38 @@ type indexLockInfo struct {
 
 var errIndexLocked = errors.New("index locked")
 
+var indexLockProcessRunning = localProcessRunning
+
 func indexLockPath(db string) string {
 	return db + ".lock"
 }
 
 func acquireIndexLock(db, operation, root string) (*indexLock, error) {
 	path := indexLockPath(db)
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
-	if err != nil {
-		if errors.Is(err, os.ErrExist) {
-			info, ok, readErr := readIndexLock(db)
-			if readErr != nil || !ok {
-				return nil, fmt.Errorf("%w: index operation already in progress: %s", errIndexLocked, path)
+	for attempt := 0; attempt < 2; attempt++ {
+		file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		if err != nil {
+			if errors.Is(err, os.ErrExist) {
+				info, ok, readErr := readIndexLock(db)
+				if readErr != nil || !ok {
+					return nil, fmt.Errorf("%w: index operation already in progress: %s", errIndexLocked, path)
+				}
+				if isStaleIndexLock(info) {
+					if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+						return nil, fmt.Errorf("%w: stale index lock could not be removed: %s", errIndexLocked, path)
+					}
+					continue
+				}
+				return nil, fmt.Errorf("%w: index %s already in progress for %s (pid %s, lock: %s)", errIndexLocked, info.operationName(), db, info.pidText(), path)
 			}
-			return nil, fmt.Errorf("%w: index %s already in progress for %s (pid %s, lock: %s)", errIndexLocked, info.operationName(), db, info.pidText(), path)
+			return nil, err
 		}
-		return nil, err
+		return writeIndexLockFile(file, path, operation, root)
 	}
+	return nil, fmt.Errorf("%w: index operation already in progress: %s", errIndexLocked, path)
+}
+
+func writeIndexLockFile(file *os.File, path, operation, root string) (*indexLock, error) {
 	ok := false
 	defer func() {
 		if !ok {
@@ -83,6 +100,20 @@ func readIndexLock(db string) (indexLockInfo, bool, error) {
 	return parseIndexLock(string(data)), true, nil
 }
 
+func readActiveIndexLock(db string) (indexLockInfo, bool, error) {
+	info, locked, err := readIndexLock(db)
+	if err != nil || !locked {
+		return info, locked, err
+	}
+	if !isStaleIndexLock(info) {
+		return info, true, nil
+	}
+	if err := os.Remove(indexLockPath(db)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return info, true, err
+	}
+	return indexLockInfo{}, false, nil
+}
+
 func parseIndexLock(text string) indexLockInfo {
 	var info indexLockInfo
 	for _, line := range strings.Split(text, "\n") {
@@ -118,8 +149,32 @@ func (info indexLockInfo) pidText() string {
 	return "unknown"
 }
 
+func isStaleIndexLock(info indexLockInfo) bool {
+	pid, err := strconv.Atoi(info.pid)
+	if err != nil || pid <= 0 {
+		return false
+	}
+	running, err := indexLockProcessRunning(pid)
+	return err == nil && !running
+}
+
+func localProcessRunning(pid int) (bool, error) {
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return false, err
+	}
+	err = process.Signal(syscall.Signal(0))
+	if err == nil || errors.Is(err, syscall.EPERM) {
+		return true, nil
+	}
+	if errors.Is(err, os.ErrProcessDone) || errors.Is(err, syscall.ESRCH) {
+		return false, nil
+	}
+	return true, err
+}
+
 func queryLockNotice(db string) (string, error) {
-	info, locked, err := readIndexLock(db)
+	info, locked, err := readActiveIndexLock(db)
 	if err != nil {
 		return "", err
 	}
@@ -136,7 +191,7 @@ func queryLockNotice(db string) (string, error) {
 }
 
 func printLockSkipped(db string) {
-	info, locked, err := readIndexLock(db)
+	info, locked, err := readActiveIndexLock(db)
 	if err != nil || !locked {
 		fmt.Fprintf(os.Stderr, "index operation already in progress; skipped: %s\n", db)
 		return

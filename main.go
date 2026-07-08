@@ -316,7 +316,7 @@ func runUpdate(args []string) error {
 		db = defaultDBPath(root)
 	}
 	if !fileExists(db) {
-		if _, locked, err := readIndexLock(db); err != nil {
+		if _, locked, err := readActiveIndexLock(db); err != nil {
 			return err
 		} else if locked {
 			printLockSkipped(db)
@@ -548,11 +548,15 @@ func cmdStats(args []string) error {
 	sql := `select 'root' as key, value from meta where key = 'root'
 union all select 'schema_version', value from meta where key = 'schema_version'
 union all select 'file_source', value from meta where key = 'file_source'
+union all select 'indexed_at', value from meta where key = 'indexed_at'
 union all select 'updated_at', value from meta where key = 'updated_at'
 union all select 'last_operation', value from meta where key = 'last_operation'
 union all select 'vcs_kind', value from meta where key = 'vcs_kind'
 union all select 'vcs_revision', value from meta where key = 'vcs_revision'
 union all select 'vcs_ref', value from meta where key = 'vcs_ref'
+union all select 'vcs_head', value from meta where key = 'vcs_head'
+union all select 'vcs_branch', value from meta where key = 'vcs_branch'
+union all select 'vcs_dirty', value from meta where key = 'vcs_dirty'
 union all select 'files', cast(count(*) as text) from files
 union all select 'symbols', cast(count(*) as text) from symbols
 union all select 'lines', cast(count(*) as text) from lines
@@ -641,11 +645,13 @@ func cmdStatus(args []string) error {
 			return err
 		}
 		printMetaStatus(meta)
+		printCurrentStatus(*root, meta)
 	}
 	if locked {
 		fmt.Printf("lock\t%s\n", indexLockPath(db))
 		fmt.Printf("lock_operation\t%s\n", lockInfo.operationName())
 		fmt.Printf("lock_pid\t%s\n", lockInfo.pidText())
+		fmt.Printf("lock_stale\t%s\n", yesNo(isStaleIndexLock(lockInfo)))
 		if lockInfo.startedAt != "" {
 			fmt.Printf("lock_started_at\t%s\n", lockInfo.startedAt)
 		}
@@ -662,9 +668,13 @@ func printMetaStatus(meta map[string]string) {
 		"schema_version",
 		"file_source",
 		"hash_algorithm",
+		"indexed_at",
 		"updated_at",
 		"last_operation",
 		"vcs_kind",
+		"vcs_head",
+		"vcs_branch",
+		"vcs_dirty",
 		"vcs_revision",
 		"vcs_ref",
 		"fts5",
@@ -673,4 +683,40 @@ func printMetaStatus(meta map[string]string) {
 			fmt.Printf("%s\t%s\n", key, value)
 		}
 	}
+}
+
+func printCurrentStatus(root string, meta map[string]string) {
+	if root == "" {
+		root = meta["root"]
+	}
+	if root == "" {
+		return
+	}
+	status, ok := currentVCSStatus(root)
+	if !ok {
+		return
+	}
+	fmt.Printf("current_vcs_kind\t%s\n", status.kind)
+	if status.revision != "" {
+		fmt.Printf("current_vcs_head\t%s\n", status.revision)
+	}
+	if status.ref != "" {
+		fmt.Printf("current_vcs_branch\t%s\n", status.ref)
+	}
+	if status.dirty != "" {
+		fmt.Printf("current_vcs_dirty\t%s\n", yesNo(status.dirty == boolText(true)))
+	}
+	if status.revision == "" && status.dirty == "" {
+		return
+	}
+	indexedHead := meta["vcs_head"]
+	if indexedHead == "" {
+		indexedHead = meta["vcs_revision"]
+	}
+	if indexedHead == "" {
+		fmt.Println("index_stale\tunknown")
+		return
+	}
+	stale := status.revision != indexedHead || status.dirty == boolText(true)
+	fmt.Printf("index_stale\t%s\n", yesNo(stale))
 }

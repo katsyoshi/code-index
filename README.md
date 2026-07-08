@@ -57,6 +57,8 @@ Show index status:
 ./code-index status --root /path/to/repo
 ```
 
+`status` reports database metadata, current lock state, current Git head/branch/dirty state, and `index_stale` when the current work tree no longer matches the indexed head or has tracked-file changes.
+
 Find symbol definitions:
 
 ```sh
@@ -134,13 +136,15 @@ chmod +x .git/hooks/post-merge
 
 The examples run in the background so Git commands do not wait for indexing. During `init`, `rebuild`, and `update`, `code-index` writes a `.lock` file next to the target database. Queries keep using a consistent SQLite snapshot and print a warning to stderr while the lock is present. If no previous index exists yet, queries fail with a message that initialization or rebuilding is still in progress.
 
-`status` combines the lock file with database metadata. Lock fields describe a currently running operation; metadata such as `updated_at`, `last_operation`, `vcs_revision`, and `vcs_ref` describes the last successful update.
+If a lock file records a PID that is no longer running, build/update/query commands treat it as stale and remove it before continuing. `status` reports `lock_stale` for visibility without requiring a rebuild.
+
+`status` combines the lock file with database metadata. Lock fields describe a currently running operation; metadata such as `indexed_at`, `last_operation`, `vcs_head`, and `vcs_branch` describes the last successful update.
 
 ## Schema
 
 Main tables:
 
-- `meta`: schema version, file source, hash algorithm, last successful update time, operation, and VCS revision metadata
+- `meta`: schema version, file source, hash algorithm, last successful index time, operation, and VCS metadata such as head, branch, and tracked-file dirty state
 - `files`: repository-relative paths and file metadata
 - `symbols`: regex-extracted definitions such as functions, methods, classes, modules, interfaces, traits, and types
 - `lines`: indexed source lines

@@ -9,18 +9,52 @@ import (
 	"strings"
 )
 
+type vcsStatus struct {
+	kind     string
+	revision string
+	ref      string
+	dirty    string
+}
+
 func currentVCSMeta(root string) []metaPair {
-	if out, err := gitOutput(root, "rev-parse", "--is-inside-work-tree"); err != nil || out != "true" {
+	status, ok := currentVCSStatus(root)
+	if !ok {
 		return nil
 	}
-	pairs := []metaPair{{"vcs_kind", "git"}}
-	if revision, err := gitOutput(root, "rev-parse", "--verify", "HEAD"); err == nil {
-		pairs = append(pairs, metaPair{"vcs_revision", revision})
+	pairs := []metaPair{{"vcs_kind", status.kind}}
+	if status.revision != "" {
+		pairs = append(pairs,
+			metaPair{"vcs_revision", status.revision},
+			metaPair{"vcs_head", status.revision},
+		)
 	}
-	if ref, err := gitOutput(root, "symbolic-ref", "--quiet", "--short", "HEAD"); err == nil {
-		pairs = append(pairs, metaPair{"vcs_ref", ref})
+	if status.ref != "" {
+		pairs = append(pairs,
+			metaPair{"vcs_ref", status.ref},
+			metaPair{"vcs_branch", status.ref},
+		)
+	}
+	if status.dirty != "" {
+		pairs = append(pairs, metaPair{"vcs_dirty", status.dirty})
 	}
 	return pairs
+}
+
+func currentVCSStatus(root string) (vcsStatus, bool) {
+	if out, err := gitOutput(root, "rev-parse", "--is-inside-work-tree"); err != nil || out != "true" {
+		return vcsStatus{}, false
+	}
+	status := vcsStatus{kind: "git"}
+	if revision, err := gitOutput(root, "rev-parse", "--verify", "HEAD"); err == nil {
+		status.revision = revision
+	}
+	if ref, err := gitOutput(root, "symbolic-ref", "--quiet", "--short", "HEAD"); err == nil {
+		status.ref = ref
+	}
+	if out, err := gitOutput(root, "status", "--porcelain", "--untracked-files=no"); err == nil {
+		status.dirty = boolText(out != "")
+	}
+	return status, true
 }
 
 func gitOutput(root string, args ...string) (string, error) {
