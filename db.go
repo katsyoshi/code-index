@@ -100,7 +100,7 @@ func fileExists(path string) bool {
 }
 
 func hasFTS5() bool {
-	cmd := exec.Command("sqlite3", ":memory:", "create virtual table t using fts5(x);")
+	cmd := exec.Command("sqlite3", ":memory:", mustEmbeddedSQL("fts5_probe.sql"))
 	return cmd.Run() == nil
 }
 
@@ -149,12 +149,12 @@ func writeOperationMetaSQL(w io.Writer, root, operation string, fts bool) {
 		if pair.value == "" {
 			continue
 		}
-		writeSQL(w, "insert or replace into meta(key, value) values(%s, %s);\n", quote(pair.key), quote(pair.value))
+		writeSQL(w, "%s\n", formatEmbeddedSQL("meta_upsert.sql", quote(pair.key), quote(pair.value)))
 	}
 }
 
 func loadMeta(db string) (map[string]string, error) {
-	out, err := sqliteQueryOutput(db, "select key, value from meta order by key;")
+	out, err := sqliteQueryOutput(db, mustEmbeddedSQL("meta_select.sql"))
 	if err != nil {
 		return nil, err
 	}
@@ -173,7 +173,7 @@ func loadMeta(db string) (map[string]string, error) {
 }
 
 func loadIndexedFileStates(db string) (map[string]indexedFileState, error) {
-	out, err := sqliteQueryOutput(db, "select path, content_hash, size, mtime from files order by path;")
+	out, err := sqliteQueryOutput(db, mustEmbeddedSQL("file_states.sql"))
 	if err != nil {
 		return nil, err
 	}
@@ -204,7 +204,7 @@ func loadIndexedFileStates(db string) (map[string]indexedFileState, error) {
 }
 
 func dbHasFTS5Tables(db string) (bool, error) {
-	out, err := sqliteQueryOutput(db, "select count(*) from sqlite_master where type = 'table' and name in ('files_fts', 'symbols_fts');")
+	out, err := sqliteQueryOutput(db, mustEmbeddedSQL("fts5_table_count.sql"))
 	if err != nil {
 		return false, err
 	}
