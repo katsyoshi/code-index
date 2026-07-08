@@ -1,6 +1,9 @@
 package main
 
-import "embed"
+import (
+	"embed"
+	"fmt"
+)
 
 //go:embed sql/*.sql
 var sqlFiles embed.FS
@@ -11,4 +14,8 @@ func mustEmbeddedSQL(name string) string {
 		panic(err)
 	}
 	return string(data)
+}
+
+func formatEmbeddedSQL(name string, args ...any) string {
+	return fmt.Sprintf(mustEmbeddedSQL(name), args...)
 }
