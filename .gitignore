@@ -1,4 +1,5 @@
 /code-index
+/.local/
 /*.md
 *.sqlite
 *.sqlite3
