@@ -71,30 +71,40 @@ func writeFileIndexDeleteSQL(w io.Writer, path string, fts bool) {
 }
 
 func writeFileIndexInsertSQL(w io.Writer, index fileIndex, fts bool, fileID int, symbolID *int) {
-	fileIDExpr := "(select id from files where path = " + quote(index.path) + ")"
+	quotedPath := quote(index.path)
+	quotedLanguage := nullableQuote(index.language)
+	quotedExtension := quote(index.extension)
+	quotedContentHash := quote(index.contentHash)
+	fileIDExpr := "(select id from files where path = " + quotedPath + ")"
 	if fileID > 0 {
 		writeSQL(
 			w,
-			"insert into files(id, path, language, extension, size, mtime, content_hash) values(%d, %s, %s, %s, %d, %d, %s);\n",
-			fileID,
-			quote(index.path),
-			nullableQuote(index.language),
-			quote(index.extension),
-			index.size,
-			index.mtime,
-			quote(index.contentHash),
+			"%s\n",
+			formatEmbeddedSQL(
+				"file_insert_with_id.sql",
+				fileID,
+				quotedPath,
+				quotedLanguage,
+				quotedExtension,
+				index.size,
+				index.mtime,
+				quotedContentHash,
+			),
 		)
 		fileIDExpr = strconv.Itoa(fileID)
 	} else {
 		writeSQL(
 			w,
-			"insert into files(path, language, extension, size, mtime, content_hash) values(%s, %s, %s, %d, %d, %s);\n",
-			quote(index.path),
-			nullableQuote(index.language),
-			quote(index.extension),
-			index.size,
-			index.mtime,
-			quote(index.contentHash),
+			"%s\n",
+			formatEmbeddedSQL(
+				"file_insert.sql",
+				quotedPath,
+				quotedLanguage,
+				quotedExtension,
+				index.size,
+				index.mtime,
+				quotedContentHash,
+			),
 		)
 	}
 	for lineIndex, line := range index.lines {
