@@ -63,14 +63,11 @@ func scanFileIndex(root, path string, info fs.FileInfo, maxBytes int64) (fileInd
 }
 
 func writeFileIndexDeleteSQL(w io.Writer, path string, fts bool) {
+	quotedPath := quote(path)
 	if fts {
-		writeSQL(w, "delete from files_fts where path = %s;\n", quote(path))
-		writeSQL(w, "delete from symbols_fts where path = %s;\n", quote(path))
+		writeSQL(w, "%s\n", formatEmbeddedSQL("file_index_delete_fts.sql", quotedPath, quotedPath))
 	}
-	writeSQL(w, "delete from lines where file_id in (select id from files where path = %s);\n", quote(path))
-	writeSQL(w, "delete from symbols where path = %s;\n", quote(path))
-	writeSQL(w, "delete from file_metrics where path = %s;\n", quote(path))
-	writeSQL(w, "delete from files where path = %s;\n", quote(path))
+	writeSQL(w, "%s\n", formatEmbeddedSQL("file_index_delete.sql", quotedPath, quotedPath, quotedPath, quotedPath))
 }
 
 func writeFileIndexInsertSQL(w io.Writer, index fileIndex, fts bool, fileID int, symbolID *int) {
