@@ -1,0 +1,7 @@
+# Merge this into ~/.codex/.env, or export the same variable in the
+# environment that launches Codex.
+#
+# Point this at the code-index binary installed under the code-index skill
+# directory. Keep the binary outside PATH lookup so agents run the intended
+# executable.
+CODE_INDEX_BIN=/path/to/installed/skills/code-index/exec/code-index

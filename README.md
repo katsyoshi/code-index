@@ -54,6 +54,15 @@ ln -s "$PWD/skills/code-index" "$SKILL_DIR"
 If the target already exists, remove or rename it first. For other agent runtimes, set `SKILL_DIR` to that runtime's installed `skills/code-index` directory.
 
 Configure `CODE_INDEX_BIN` in the environment where the agent runs.
+For Codex, `skills/code-index/agents/codex/codex-env.sample` can be merged into
+`${CODEX_HOME:-$HOME/.codex}/.env`.
+
+For example, append the installed binary path to Codex's `.env`:
+
+```sh
+CODEX_ENV="${CODEX_HOME:-$HOME/.codex}/.env"
+printf '\n# code-index\nCODE_INDEX_BIN=%s\n' "$SKILL_DIR/exec/code-index" >> "$CODEX_ENV"
+```
 
 Host-specific metadata can live under `skills/code-index/agents/`; agents that do not use those files can ignore them.
 
