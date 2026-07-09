@@ -11,6 +11,22 @@ Use `code-index` as the first search surface for codebase navigation. Prefer SQL
 
 Use an external `code-index` binary from an explicit `CODE_INDEX_BIN` path. If `CODE_INDEX_BIN` is not set, ask the user to install `code-index` and set `CODE_INDEX_BIN` to the binary path. If an agent runtime installs this skill with a bundled `scripts/code-index` helper, treat that helper only as a fallback because it may lag the standalone CLI.
 
+## Install Guidance
+
+When `CODE_INDEX_BIN` is missing or points to a non-executable file, do not search `PATH`. Ask the user to install `code-index` under the directory containing this `SKILL.md`, then set `CODE_INDEX_BIN` to that binary path:
+
+```bash
+SKILL_DIR=/path/to/installed/skills/code-index
+mkdir -p "$SKILL_DIR/exec"
+GOBIN="$SKILL_DIR/exec" go install github.com/katsyoshi/code-index@latest
+export CODE_INDEX_BIN="$SKILL_DIR/exec/code-index"
+"$CODE_INDEX_BIN" version
+```
+
+For local development of this repository, building the checked-out source with `go build -o "$SKILL_DIR/exec/code-index" .` and pointing `CODE_INDEX_BIN` at that binary is also acceptable.
+
+The `version` output identifies the binary by build commit when available. Treat the commit hash as an identity, not as an ordered version, unless you have commit-history context.
+
 ## Workflow
 
 1. Resolve the target repository root.

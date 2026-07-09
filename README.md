@@ -6,34 +6,58 @@ It is not intended to replace language servers, VCS indexes, or full code-intell
 
 The binary is written in Go and uses the `sqlite3` command for database creation and queries. The built binary does not require a Go runtime.
 
-The reusable agent skill source lives at `skills/code-index/SKILL.md`. It is written to be usable by coding agents such as Codex or Claude, and prefers an external `code-index` binary on `PATH`.
+The reusable agent skill source lives at `skills/code-index/SKILL.md`. It is written to be usable by coding agents such as Codex or Claude. Agents should use an explicit `CODE_INDEX_BIN` path instead of searching `PATH`, so they do not accidentally run a different `code-index` binary.
 
-For local agent-skill development, keep the checked-in skill as the source of truth and symlink or copy it into the skill directory used by your agent runtime. For Codex:
+## Install
+
+`code-index` requires `git`, the `sqlite3` command, and Go for installation.
+
+Choose the installed skill directory for your agent runtime. This is the directory that contains `SKILL.md`:
 
 ```sh
-mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
-ln -s "$PWD/skills/code-index" "${CODEX_HOME:-$HOME/.codex}/skills/code-index"
+SKILL_DIR=/path/to/installed/skills/code-index
 ```
 
-If the target already exists, remove or rename it first.
-
-Host-specific metadata can live under `skills/code-index/agents/`; agents that do not use those files can ignore them.
-
-## Build
+Install the binary under that skill directory:
 
 ```sh
-go build -o code-index .
+mkdir -p "$SKILL_DIR/exec"
+GOBIN="$SKILL_DIR/exec" go install github.com/katsyoshi/code-index@latest
 ```
 
-## Usage
-
-Show build information:
+Point agents and hooks at the exact binary:
 
 ```sh
-./code-index version
+export CODE_INDEX_BIN="$SKILL_DIR/exec/code-index"
+"$CODE_INDEX_BIN" version
 ```
 
 `version` prints the build commit hash when available, plus schema metadata useful for compatibility checks.
+
+For local development in this repository, build the checked-out source and point `CODE_INDEX_BIN` at that binary:
+
+```sh
+SKILL_DIR=/path/to/installed/skills/code-index
+mkdir -p "$SKILL_DIR/exec"
+go build -o "$SKILL_DIR/exec/code-index" .
+export CODE_INDEX_BIN="$SKILL_DIR/exec/code-index"
+```
+
+For Codex local skill development, you can symlink the checked-in skill into Codex's skill directory first:
+
+```sh
+SKILL_DIR="${CODEX_HOME:-$HOME/.codex}/skills/code-index"
+mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
+ln -s "$PWD/skills/code-index" "$SKILL_DIR"
+```
+
+If the target already exists, remove or rename it first. For other agent runtimes, set `SKILL_DIR` to that runtime's installed `skills/code-index` directory.
+
+Configure `CODE_INDEX_BIN` in the environment where the agent runs.
+
+Host-specific metadata can live under `skills/code-index/agents/`; agents that do not use those files can ignore them.
+
+## Usage
 
 Initialize an empty index database:
 
@@ -105,7 +129,7 @@ The default database is stored under `CODE_INDEX_CACHE_DIR` when set. Otherwise 
 
 ## Git Hooks
 
-You can refresh the local index automatically after branch checkouts and merges. These hooks are optional and only run when `code-index` is available on `PATH`.
+You can refresh the local index automatically after branch checkouts and merges. These hooks are optional and only run when `CODE_INDEX_BIN` points to an executable `code-index` binary. If Git runs hooks outside your shell environment, set `CODE_INDEX_BIN` inside the hook or from the environment that launches Git.
 
 Refresh the index after switching branches:
 
@@ -116,11 +140,12 @@ cat > .git/hooks/post-checkout <<'EOF'
 [ "$3" = "1" ] || exit 0
 
 root="$(git rev-parse --show-toplevel)" || exit 0
-command -v code-index >/dev/null 2>&1 || exit 0
+[ -n "${CODE_INDEX_BIN:-}" ] || exit 0
+[ -x "$CODE_INDEX_BIN" ] || exit 0
 
 (
-  code-index update "$root" >/dev/null 2>&1 ||
-    code-index rebuild "$root" >/dev/null 2>&1
+  "$CODE_INDEX_BIN" update "$root" >/dev/null 2>&1 ||
+    "$CODE_INDEX_BIN" rebuild "$root" >/dev/null 2>&1
 ) &
 EOF
 chmod +x .git/hooks/post-checkout
@@ -132,11 +157,12 @@ Refresh the index after pulls or merges:
 cat > .git/hooks/post-merge <<'EOF'
 #!/bin/sh
 root="$(git rev-parse --show-toplevel)" || exit 0
-command -v code-index >/dev/null 2>&1 || exit 0
+[ -n "${CODE_INDEX_BIN:-}" ] || exit 0
+[ -x "$CODE_INDEX_BIN" ] || exit 0
 
 (
-  code-index update "$root" >/dev/null 2>&1 ||
-    code-index rebuild "$root" >/dev/null 2>&1
+  "$CODE_INDEX_BIN" update "$root" >/dev/null 2>&1 ||
+    "$CODE_INDEX_BIN" rebuild "$root" >/dev/null 2>&1
 ) &
 EOF
 chmod +x .git/hooks/post-merge
