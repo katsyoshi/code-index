@@ -27,6 +27,14 @@ go build -o code-index .
 
 ## Usage
 
+Show build information:
+
+```sh
+./code-index version
+```
+
+`version` prints the build commit hash when available, plus schema metadata useful for compatibility checks.
+
 Initialize an empty index database:
 
 ```sh

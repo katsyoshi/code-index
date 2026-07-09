@@ -85,6 +85,15 @@ func TestInstallBuiltDBReplacesDBAndRemovesSidecars(t *testing.T) {
 	}
 }
 
+func TestVersionCommand(t *testing.T) {
+	if err := run([]string{"version"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := run([]string{"version", "extra"}); err == nil {
+		t.Fatal("version with extra arg succeeded, want failure")
+	}
+}
+
 func TestIndexLockPreventsConcurrentBuilds(t *testing.T) {
 	db := filepath.Join(t.TempDir(), "index.sqlite")
 	lock, err := acquireIndexLock(db, "rebuild", "/repo")

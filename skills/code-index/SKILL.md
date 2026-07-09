@@ -9,7 +9,7 @@ description: Build and use a local SQLite index for code navigation instead of a
 
 Use `code-index` as the first search surface for codebase navigation. Prefer SQL-backed queries for locating files, definitions, methods, classes, relevant source lines, metrics, and index status.
 
-Use an external `code-index` binary on `PATH`. If an agent runtime installs this skill with a bundled `scripts/code-index` helper, treat that helper only as a fallback because it may lag the standalone CLI.
+Use an external `code-index` binary from an explicit `CODE_INDEX_BIN` path. If `CODE_INDEX_BIN` is not set, ask the user to install `code-index` and set `CODE_INDEX_BIN` to the binary path. If an agent runtime installs this skill with a bundled `scripts/code-index` helper, treat that helper only as a fallback because it may lag the standalone CLI.
 
 ## Workflow
 
@@ -17,27 +17,38 @@ Use an external `code-index` binary on `PATH`. If an agent runtime installs this
 2. Select the tool:
 
 ```bash
-if ! command -v code-index >/dev/null 2>&1; then
-  echo "code-index is not available on PATH" >&2
+if [ -z "${CODE_INDEX_BIN:-}" ]; then
+  echo "CODE_INDEX_BIN is not set; install code-index and set CODE_INDEX_BIN to the binary path" >&2
   exit 1
 fi
 
-TOOL="$(command -v code-index)"
+TOOL="$CODE_INDEX_BIN"
+
+if [ ! -x "$TOOL" ]; then
+  echo "code-index is not executable: $TOOL" >&2
+  exit 1
+fi
 ```
 
-3. In sandboxed agent sessions, prefer a writable cache directory unless the user gave a DB path:
+3. Check the tool build information. Prefer a build commit hash over semver for identifying the binary, but do not infer ordering from the hash without commit history. Treat the hash as compatible only when it is in a known compatible list, or use explicit feature checks when the binary supports them. If the command is unsupported or the build is incompatible for the workflow you need, ask the user to install or configure a compatible `code-index` binary:
+
+```bash
+"$TOOL" version
+```
+
+4. In sandboxed agent sessions, prefer a writable cache directory unless the user gave a DB path:
 
 ```bash
 export CODE_INDEX_CACHE_DIR="${CODE_INDEX_CACHE_DIR:-/tmp/code-index}"
 ```
 
-4. Build or refresh the index before substantial search work. Prefer `update` when an index already exists, and fall back to `rebuild` for first use. Both commands index Git-tracked files only:
+5. Build or refresh the index before substantial search work. Prefer `update` when an index already exists, and fall back to `rebuild` for first use. Both commands index Git-tracked files only:
 
 ```bash
 "$TOOL" update "$PWD" || "$TOOL" rebuild "$PWD"
 ```
 
-5. Check status when lock or freshness may matter:
+6. Check status when lock or freshness may matter:
 
 ```bash
 "$TOOL" status --root "$PWD"
@@ -45,27 +56,27 @@ export CODE_INDEX_CACHE_DIR="${CODE_INDEX_CACHE_DIR:-/tmp/code-index}"
 
 If `status` is unsupported, continue with query commands and rely on rebuild output.
 
-6. Search definitions and files through the index:
+7. Search definitions and files through the index:
 
 ```bash
 "$TOOL" defs --root "$PWD" parse_config
 "$TOOL" files --root "$PWD" config
 ```
 
-7. Run raw read-only SQL for precise lookup:
+8. Run raw read-only SQL for precise lookup:
 
 ```bash
 "$TOOL" sql --root "$PWD" \
   "select path, line, kind, name, signature from symbols where name like '%parse%' order by path, line limit 50"
 ```
 
-8. Show source around indexed lines:
+9. Show source around indexed lines:
 
 ```bash
 "$TOOL" show --root "$PWD" --line 42 lib/config.rb
 ```
 
-9. Run `update` after editing tracked files that affect search results. Use `rebuild` after tool upgrades, schema changes, or option changes that should refresh every tracked file.
+10. Run `update` after editing tracked files that affect search results. Use `rebuild` after tool upgrades, schema changes, or option changes that should refresh every tracked file.
 
 ## Search Policy
 
@@ -83,6 +94,9 @@ Common commands:
 ```bash
 # Print the default database path for a root.
 "$TOOL" path "$PWD"
+
+# Show build information for compatibility checks.
+"$TOOL" version
 
 # Initialize an empty schema when explicitly needed.
 "$TOOL" init "$PWD"

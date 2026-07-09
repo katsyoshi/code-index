@@ -25,6 +25,8 @@ func run(args []string) error {
 		return errors.New("missing command")
 	}
 	switch args[0] {
+	case "version":
+		return cmdVersion(args[1:])
 	case "path":
 		return cmdPath(args[1:])
 	case "init":
@@ -54,7 +56,22 @@ func run(args []string) error {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: code-index <path|init|rebuild|update|defs|files|sql|show|stats|metrics|status> [options]")
+	fmt.Fprintln(os.Stderr, "usage: code-index <version|path|init|rebuild|update|defs|files|sql|show|stats|metrics|status> [options]")
+}
+
+func cmdVersion(args []string) error {
+	if len(args) != 0 {
+		return errors.New("usage: code-index version")
+	}
+	info := currentBuildInfo()
+	fmt.Println("key\tvalue")
+	fmt.Printf("commit\t%s\n", info.commit)
+	if info.modified != "" {
+		fmt.Printf("modified\t%s\n", info.modified)
+	}
+	fmt.Printf("schema_version\t%s\n", schemaVersion)
+	fmt.Printf("file_source\t%s\n", fileSource)
+	return nil
 }
 
 func cmdPath(args []string) error {
