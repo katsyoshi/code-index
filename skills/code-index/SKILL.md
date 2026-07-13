@@ -27,6 +27,14 @@ For local development of this repository, building the checked-out source with `
 
 The `version` output identifies the binary by build commit when available. Treat the commit hash as an identity, not as an ordered version, unless you have commit-history context.
 
+## Operating Principles
+
+Read the `Design` section in the repository `README.md` as the source of truth for project direction. In this skill, apply that direction as an operating rule: use `code-index` to reduce how much source enters the LLM context.
+
+- Query SQLite/FTS before opening files broadly.
+- Prefer a few targeted `show`, `defs`, `files`, `metrics`, or read-only SQL results over loading whole directories.
+- Treat indexed matches as navigation candidates and open source before making behavioral claims.
+
 ## Workflow
 
 1. Resolve the target repository root.
