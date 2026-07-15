@@ -65,13 +65,15 @@ Host-specific metadata can live under `skills/code-index/agents/`; agents that d
 
 ## Usage
 
-Initialize an empty index database:
+Build or refresh the index:
 
 ```sh
-./code-index init /path/to/repo
+./code-index update /path/to/repo
 ```
 
-`init` creates the schema and metadata only. It fails if the index database already exists.
+`update` requires a Git work tree. It creates the database on first use, refreshes changed Git-tracked files, and removes files that are no longer tracked.
+
+Its change counts are file counts: `added_files`, `updated_files`, and `deleted_files`. `symbols` reports symbols indexed from added or updated files during that update; use `stats` or `metrics` for index-wide totals.
 
 Rebuild an index atomically from Git-tracked files:
 
@@ -81,15 +83,13 @@ Rebuild an index atomically from Git-tracked files:
 
 `rebuild` requires a Git work tree and indexes files reported by `git ls-files`. If another `init`, `rebuild`, or `update` is already running for the same database, `rebuild` skips and exits successfully.
 
-Update an existing index incrementally:
+Initialize an empty index database when explicitly needed:
 
 ```sh
-./code-index update /path/to/repo
+./code-index init /path/to/repo
 ```
 
-`update` requires a Git work tree. It creates the database on first use, refreshes changed Git-tracked files, and removes files that are no longer tracked.
-
-Its change counts are file counts: `added_files`, `updated_files`, and `deleted_files`. `symbols` reports symbols indexed from added or updated files during that update; use `stats` or `metrics` for index-wide totals.
+`init` creates the schema and metadata only. It fails if the index database already exists.
 
 Show index status:
 
@@ -176,7 +176,7 @@ EOF
 chmod +x .git/hooks/post-merge
 ```
 
-The examples run in the background so Git commands do not wait for indexing. During `init`, `rebuild`, and `update`, `code-index` writes a `.lock` file next to the target database. Queries keep using a consistent SQLite snapshot and print a warning to stderr while the lock is present. If no previous index exists yet, queries fail with a message that initialization or rebuilding is still in progress.
+The examples run in the background so Git commands do not wait for indexing. During `init`, `rebuild`, and `update`, `code-index` writes a `.lock` file next to the target database. Queries keep using a consistent SQLite snapshot and print a warning to stderr while the lock is present. If no previous index exists yet, queries fail with a message that indexing is still in progress.
 
 If a lock file records a PID that is no longer running, build/update/query commands treat it as stale and remove it before continuing. `status` reports `lock_stale` for visibility without requiring a rebuild.
 
@@ -186,7 +186,7 @@ If a lock file records a PID that is no longer running, build/update/query comma
 
 Main tables:
 
-- `meta`: schema version, file source, hash algorithm, last successful index time, operation, and VCS metadata such as head, branch, and tracked-file dirty state
+- `meta`: schema version, file source, hash algorithm, last successful index time, operation, and VCS metadata such as head, branch, tracked-file dirty state, and dirty snapshot hash
 - `files`: repository-relative paths and file metadata
 - `symbols`: regex-extracted definitions such as functions, methods, classes, modules, interfaces, traits, and types
 - `lines`: indexed source lines
