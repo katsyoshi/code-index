@@ -644,7 +644,9 @@ func cmdStatus(args []string) error {
 			return err
 		}
 		printMetaStatus(meta)
-		printCurrentStatus(*root, meta)
+		if err := printCurrentStatus(*root, meta); err != nil {
+			return err
+		}
 	}
 	if locked {
 		fmt.Printf("lock\t%s\n", indexLockPath(db))
@@ -674,6 +676,7 @@ func printMetaStatus(meta map[string]string) {
 		"vcs_head",
 		"vcs_branch",
 		"vcs_dirty",
+		"vcs_dirty_hash",
 		"vcs_revision",
 		"vcs_ref",
 		"fts5",
@@ -684,16 +687,16 @@ func printMetaStatus(meta map[string]string) {
 	}
 }
 
-func printCurrentStatus(root string, meta map[string]string) {
+func printCurrentStatus(root string, meta map[string]string) error {
 	if root == "" {
 		root = meta["root"]
 	}
 	if root == "" {
-		return
+		return nil
 	}
 	status, ok := currentVCSStatus(root)
 	if !ok {
-		return
+		return nil
 	}
 	fmt.Printf("current_vcs_kind\t%s\n", status.kind)
 	if status.revision != "" {
@@ -706,7 +709,7 @@ func printCurrentStatus(root string, meta map[string]string) {
 		fmt.Printf("current_vcs_dirty\t%s\n", yesNo(status.dirty == boolText(true)))
 	}
 	if status.revision == "" && status.dirty == "" {
-		return
+		return nil
 	}
 	indexedHead := meta["vcs_head"]
 	if indexedHead == "" {
@@ -714,8 +717,36 @@ func printCurrentStatus(root string, meta map[string]string) {
 	}
 	if indexedHead == "" {
 		fmt.Println("index_stale\tunknown")
-		return
+		return nil
 	}
-	stale := status.revision != indexedHead || status.dirty == boolText(true)
+	stale, known, err := currentIndexStale(root, meta, status, indexedHead)
+	if err != nil {
+		return err
+	}
+	if !known {
+		fmt.Println("index_stale\tunknown")
+		return nil
+	}
 	fmt.Printf("index_stale\t%s\n", yesNo(stale))
+	return nil
+}
+
+func currentIndexStale(root string, meta map[string]string, status vcsStatus, indexedHead string) (bool, bool, error) {
+	if status.revision != indexedHead {
+		return true, true, nil
+	}
+	if status.dirty != boolText(true) {
+		return false, true, nil
+	}
+	if meta["vcs_dirty"] != boolText(true) {
+		return true, true, nil
+	}
+	currentHash, ok, err := currentDirtyHash(root)
+	if err != nil {
+		return false, false, err
+	}
+	if !ok || meta["vcs_dirty_hash"] == "" {
+		return false, false, nil
+	}
+	return currentHash != meta["vcs_dirty_hash"], true, nil
 }

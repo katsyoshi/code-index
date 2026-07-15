@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -496,6 +497,44 @@ func TestUpdateCommandRemovesStaleSymbolsAcrossCommits(t *testing.T) {
 	assertMetaValue(t, db, "last_operation", "update")
 }
 
+func TestStatusTreatsIndexedDirtyWorkTreeAsFresh(t *testing.T) {
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		t.Skip("sqlite3 command not found")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git command not found")
+	}
+	root := t.TempDir()
+	path := filepath.Join(root, "main.go")
+	if err := os.WriteFile(path, []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	initGitRepo(t, root, "main.go")
+	runGit(t, root, "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "initial")
+	if err := os.WriteFile(path, []byte("package main\n\nfunc dirtyName() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	db := filepath.Join(t.TempDir(), "index.sqlite")
+	if err := run([]string{"update", "--db", db, root}); err != nil {
+		t.Fatal(err)
+	}
+
+	out := captureRunOutput(t, []string{"status", "--db", db})
+	if !strings.Contains(out, "index_stale\tno") {
+		t.Fatalf("status output = %q, want index_stale no", out)
+	}
+	assertMetaValue(t, db, "vcs_dirty", boolText(true))
+	assertSQLiteValue(t, db, "select count(*) from meta where key = 'vcs_dirty_hash' and value != '';", "1")
+
+	if err := os.WriteFile(path, []byte("package main\n\nfunc dirtierName() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out = captureRunOutput(t, []string{"status", "--db", db})
+	if !strings.Contains(out, "index_stale\tyes") {
+		t.Fatalf("status output = %q, want index_stale yes", out)
+	}
+}
+
 func TestUpdateCommandIndexesInitializedDB(t *testing.T) {
 	if _, err := exec.LookPath("sqlite3"); err != nil {
 		t.Skip("sqlite3 command not found")
@@ -581,4 +620,32 @@ func runGitOutput(t *testing.T, root string, args ...string) string {
 		t.Fatalf("git %s failed: %v: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}
 	return strings.TrimSpace(string(out))
+}
+
+func captureRunOutput(t *testing.T, args []string) string {
+	t.Helper()
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		os.Stdout = old
+	}()
+	os.Stdout = w
+	runErr := run(args)
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	out, readErr := io.ReadAll(r)
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if runErr != nil {
+		t.Fatal(runErr)
+	}
+	return string(out)
 }

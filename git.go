@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io/fs"
 	"os"
@@ -37,6 +39,9 @@ func currentVCSMeta(root string) []metaPair {
 	}
 	if status.dirty != "" {
 		pairs = append(pairs, metaPair{"vcs_dirty", status.dirty})
+		if dirtyHash, ok, err := currentDirtyHash(root); err == nil && ok && dirtyHash != "" {
+			pairs = append(pairs, metaPair{"vcs_dirty_hash", dirtyHash})
+		}
 	}
 	return pairs
 }
@@ -135,19 +140,60 @@ func updateCandidatePaths(root string, existing map[string]indexedFileState, met
 			candidates[path] = true
 		}
 	}
+	dirty, err := dirtyCandidatePaths(root)
+	if err != nil {
+		return nil, false
+	}
+	for path := range dirty {
+		candidates[path] = true
+	}
+	return candidates, true
+}
+
+func dirtyCandidatePaths(root string) (map[string]bool, error) {
+	candidates := map[string]bool{}
 	for _, args := range [][]string{
-		{"diff", "--name-only", "-z", "--", "."},
-		{"diff", "--name-only", "-z", "--cached", "--", "."},
+		{"diff", "--name-only", "-z", "--no-renames", "--", "."},
+		{"diff", "--name-only", "-z", "--no-renames", "--cached", "--", "."},
 	} {
 		paths, err := gitNameOnly(root, args...)
 		if err != nil {
-			return nil, false
+			return nil, err
 		}
 		for _, path := range paths {
 			candidates[path] = true
 		}
 	}
-	return candidates, true
+	return candidates, nil
+}
+
+func currentDirtyHash(root string) (string, bool, error) {
+	candidates, err := dirtyCandidatePaths(root)
+	if err != nil {
+		return "", false, err
+	}
+	parts := []string{}
+	seen := map[string]bool{}
+	err = walkGitTrackedFileSet(root, cloneIgnored(nil), 1_000_000, candidates, func(path string, info fs.FileInfo) error {
+		index, err := scanFileIndex(root, path, info, 1_000_000)
+		if err != nil {
+			return nil
+		}
+		seen[index.path] = true
+		parts = append(parts, index.path+"\t"+index.contentHash)
+		return nil
+	})
+	if err != nil {
+		return "", false, err
+	}
+	for rel := range candidates {
+		if !seen[rel] {
+			parts = append(parts, rel+"\t-")
+		}
+	}
+	sort.Strings(parts)
+	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
+	return hex.EncodeToString(sum[:]), true, nil
 }
 
 func gitDiffNameOnly(root, oldRevision, newRevision string) ([]string, error) {

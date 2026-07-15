@@ -87,7 +87,7 @@ Update an existing index incrementally:
 ./code-index update /path/to/repo
 ```
 
-`update` requires a Git work tree. It refreshes changed Git-tracked files and removes files that are no longer tracked. It requires an existing database, so run `init` or `rebuild` first.
+`update` requires a Git work tree. It creates the database on first use, refreshes changed Git-tracked files, and removes files that are no longer tracked.
 
 Show index status:
 
@@ -95,7 +95,7 @@ Show index status:
 ./code-index status --root /path/to/repo
 ```
 
-`status` reports database metadata, current lock state, current Git head/branch/dirty state, and `index_stale` when the current work tree no longer matches the indexed head or has tracked-file changes.
+`status` reports database metadata, current lock state, current Git head/branch/dirty state, and `index_stale`. A dirty work tree is fresh when it matches the dirty snapshot recorded by the last successful index operation.
 
 Find symbol definitions:
 
