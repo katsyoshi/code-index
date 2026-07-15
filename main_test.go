@@ -297,6 +297,36 @@ func TestUpdateCommandCreatesSQLiteIndex(t *testing.T) {
 	assertMetaValue(t, db, "last_operation", "update")
 }
 
+func TestUpdateOutputReportsChangedFileCounts(t *testing.T) {
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		t.Skip("sqlite3 command not found")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git command not found")
+	}
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	initGitRepo(t, root, "main.go")
+	db := filepath.Join(t.TempDir(), "index.sqlite")
+
+	if err := run([]string{"update", "--db", db, root}); err != nil {
+		t.Fatal(err)
+	}
+	out := captureRunOutput(t, []string{"update", "--db", db, root})
+	for _, want := range []string{"added_files:", "updated_files:", "deleted_files:", "symbols:"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("update output = %q, want %s", out, want)
+		}
+	}
+	for _, unwanted := range []string{"unchanged:", "lines:", "code_lines:", "comment_lines:", "blank_lines:"} {
+		if strings.Contains(out, unwanted) {
+			t.Fatalf("update output = %q, want no %s", out, unwanted)
+		}
+	}
+}
+
 func TestStatusReportsLock(t *testing.T) {
 	db := filepath.Join(t.TempDir(), "index.sqlite")
 	lock, err := acquireIndexLock(db, "rebuild", "/repo")

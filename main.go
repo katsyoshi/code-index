@@ -379,9 +379,8 @@ func runUpdate(args []string) error {
 	writeSQL(writer, "begin immediate;\n")
 	ignored := cloneIgnored(extraIgnored)
 	seen := map[string]bool{}
-	var added, updated, deleted, unchanged int
-	var symbolCount, lineCount int
-	var codeLineCount, commentLineCount, blankLineCount int
+	var added, updated, deleted int
+	var symbolCount int
 	err = walkGitTrackedFileSet(root, ignored, *maxBytes, candidates, func(path string, info fs.FileInfo) error {
 		index, err := scanFileIndex(root, path, info, *maxBytes)
 		if err != nil {
@@ -390,7 +389,6 @@ func runUpdate(args []string) error {
 		seen[index.path] = true
 		state, existed := existing[index.path]
 		if existed && state.contentHash == index.contentHash {
-			unchanged++
 			return nil
 		}
 		if existed {
@@ -401,10 +399,6 @@ func runUpdate(args []string) error {
 		writeFileIndexDeleteSQL(writer, index.path, fts)
 		writeFileIndexInsertSQL(writer, index, fts, 0, nil)
 		symbolCount += len(index.symbols)
-		lineCount += len(index.lines)
-		codeLineCount += index.metrics.codeLines
-		commentLineCount += index.metrics.commentLines
-		blankLineCount += index.metrics.blankLines
 		return nil
 	})
 	if err != nil {
@@ -415,7 +409,6 @@ func runUpdate(args []string) error {
 			continue
 		}
 		if candidateOnly && !candidates[rel] {
-			unchanged++
 			continue
 		}
 		writeFileIndexDeleteSQL(writer, rel, fts)
@@ -432,15 +425,10 @@ func runUpdate(args []string) error {
 	writerOK = true
 	fmt.Printf("db: %s\n", db)
 	fmt.Printf("root: %s\n", root)
-	fmt.Printf("added: %d\n", added)
-	fmt.Printf("updated: %d\n", updated)
-	fmt.Printf("deleted: %d\n", deleted)
-	fmt.Printf("unchanged: %d\n", unchanged)
+	fmt.Printf("added_files: %d\n", added)
+	fmt.Printf("updated_files: %d\n", updated)
+	fmt.Printf("deleted_files: %d\n", deleted)
 	fmt.Printf("symbols: %d\n", symbolCount)
-	fmt.Printf("lines: %d\n", lineCount)
-	fmt.Printf("code_lines: %d\n", codeLineCount)
-	fmt.Printf("comment_lines: %d\n", commentLineCount)
-	fmt.Printf("blank_lines: %d\n", blankLineCount)
 	fmt.Printf("hash_algorithm: %s\n", contentHashAlgorithm)
 	fmt.Printf("fts5: %s\n", yesNo(fts))
 	return nil

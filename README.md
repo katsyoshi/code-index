@@ -89,6 +89,8 @@ Update an existing index incrementally:
 
 `update` requires a Git work tree. It creates the database on first use, refreshes changed Git-tracked files, and removes files that are no longer tracked.
 
+Its change counts are file counts: `added_files`, `updated_files`, and `deleted_files`. `symbols` reports symbols indexed from added or updated files during that update; use `stats` or `metrics` for index-wide totals.
+
 Show index status:
 
 ```sh
