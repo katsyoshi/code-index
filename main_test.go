@@ -262,6 +262,40 @@ func TestUpdateSkipsWhenLockedWithoutExistingDB(t *testing.T) {
 	}
 }
 
+func TestUpdateCommandCreatesSQLiteIndex(t *testing.T) {
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		t.Skip("sqlite3 command not found")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git command not found")
+	}
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "untracked.go"), []byte("package main\n\nfunc untracked() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	initGitRepo(t, root, "main.go")
+	db := filepath.Join(t.TempDir(), "index.sqlite")
+
+	if err := run([]string{"update", "--db", db, root}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(db); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(indexLockPath(db)); !os.IsNotExist(err) {
+		t.Fatalf("lock file still exists or returned unexpected error: %v", err)
+	}
+	assertSQLiteValue(t, db, "select count(*) from symbols where name = 'main';", "1")
+	assertSQLiteValue(t, db, "select count(*) from symbols where name = 'untracked';", "0")
+	assertMetaValue(t, db, "schema_version", schemaVersion)
+	assertMetaValue(t, db, "file_source", fileSource)
+	assertMetaValue(t, db, "hash_algorithm", contentHashAlgorithm)
+	assertMetaValue(t, db, "last_operation", "update")
+}
+
 func TestStatusReportsLock(t *testing.T) {
 	db := filepath.Join(t.TempDir(), "index.sqlite")
 	lock, err := acquireIndexLock(db, "rebuild", "/repo")
@@ -427,6 +461,38 @@ func TestUpdateCommandAppliesFileChanges(t *testing.T) {
 	assertSQLiteValue(t, db, "select count(*) from files where path = 'stale.rb';", "0")
 	assertSQLiteValue(t, db, "select count(*) from files where path = 'added.py';", "1")
 	assertSQLiteValue(t, db, "select count(*) from files where path = 'untracked.py';", "0")
+	assertMetaValue(t, db, "last_operation", "update")
+}
+
+func TestUpdateCommandRemovesStaleSymbolsAcrossCommits(t *testing.T) {
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		t.Skip("sqlite3 command not found")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git command not found")
+	}
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n\nfunc oldName() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	initGitRepo(t, root, "main.go")
+	runGit(t, root, "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "initial")
+	db := filepath.Join(t.TempDir(), "index.sqlite")
+	if err := run([]string{"rebuild", "--db", db, root}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n\nfunc nextName() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "add", "main.go")
+	runGit(t, root, "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "rename function")
+
+	if err := run([]string{"update", "--db", db, root}); err != nil {
+		t.Fatal(err)
+	}
+	assertSQLiteValue(t, db, "select count(*) from symbols where name = 'oldName';", "0")
+	assertSQLiteValue(t, db, "select count(*) from symbols where name = 'nextName';", "1")
 	assertMetaValue(t, db, "last_operation", "update")
 }
 

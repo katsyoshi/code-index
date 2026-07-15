@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -67,10 +68,28 @@ func gitOutput(root string, args ...string) (string, error) {
 }
 
 func walkGitTrackedFiles(root string, ignored map[string]bool, maxBytes int64, fn func(path string, info fs.FileInfo) error) error {
+	return walkGitTrackedFileSet(root, ignored, maxBytes, nil, fn)
+}
+
+func walkGitTrackedFileSet(root string, ignored map[string]bool, maxBytes int64, candidates map[string]bool, fn func(path string, info fs.FileInfo) error) error {
 	if err := requireGitWorkTree(root); err != nil {
 		return err
 	}
-	cmd := exec.Command("git", "-C", root, "ls-files", "-z", "--", ".")
+	args := []string{"-C", root, "ls-files", "-z", "--"}
+	if candidates == nil {
+		args = append(args, ".")
+	} else {
+		paths := make([]string, 0, len(candidates))
+		for path := range candidates {
+			paths = append(paths, path)
+		}
+		if len(paths) == 0 {
+			return nil
+		}
+		sort.Strings(paths)
+		args = append(args, paths...)
+	}
+	cmd := exec.Command("git", args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git ls-files failed: %w: %s", err, strings.TrimSpace(string(out)))
@@ -96,6 +115,63 @@ func walkGitTrackedFiles(root string, ignored map[string]bool, maxBytes int64, f
 		}
 	}
 	return nil
+}
+
+func updateCandidatePaths(root string, existing map[string]indexedFileState, meta map[string]string) (map[string]bool, bool) {
+	if len(existing) == 0 || meta["vcs_dirty"] != boolText(false) || meta["vcs_revision"] == "" {
+		return nil, false
+	}
+	current, ok := currentVCSStatus(root)
+	if !ok || current.revision == "" {
+		return nil, false
+	}
+	candidates := map[string]bool{}
+	if current.revision != meta["vcs_revision"] {
+		paths, err := gitDiffNameOnly(root, meta["vcs_revision"], current.revision)
+		if err != nil {
+			return nil, false
+		}
+		for _, path := range paths {
+			candidates[path] = true
+		}
+	}
+	for _, args := range [][]string{
+		{"diff", "--name-only", "-z", "--", "."},
+		{"diff", "--name-only", "-z", "--cached", "--", "."},
+	} {
+		paths, err := gitNameOnly(root, args...)
+		if err != nil {
+			return nil, false
+		}
+		for _, path := range paths {
+			candidates[path] = true
+		}
+	}
+	return candidates, true
+}
+
+func gitDiffNameOnly(root, oldRevision, newRevision string) ([]string, error) {
+	return gitNameOnly(root, "diff", "--name-only", "-z", "--no-renames", oldRevision, newRevision, "--", ".")
+}
+
+func gitNameOnly(root string, args ...string) ([]string, error) {
+	cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("git %s failed: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+	}
+	paths := []string{}
+	for _, rel := range strings.Split(string(out), "\x00") {
+		if rel == "" {
+			continue
+		}
+		rel = filepath.ToSlash(filepath.Clean(rel))
+		if rel == "." || strings.HasPrefix(rel, "../") || filepath.IsAbs(rel) {
+			continue
+		}
+		paths = append(paths, rel)
+	}
+	return paths, nil
 }
 
 func requireGitWorkTree(root string) error {

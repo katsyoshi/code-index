@@ -332,14 +332,8 @@ func runUpdate(args []string) error {
 	if db == "" {
 		db = defaultDBPath(root)
 	}
-	if !fileExists(db) {
-		if _, locked, err := readActiveIndexLock(db); err != nil {
-			return err
-		} else if locked {
-			printLockSkipped(db)
-			return nil
-		}
-		return fmt.Errorf("index not found: %s; run init or rebuild first, or pass --db", db)
+	if err := os.MkdirAll(filepath.Dir(db), 0o755); err != nil {
+		return err
 	}
 	lock, err := acquireIndexLock(db, "update", root)
 	if err != nil {
@@ -350,10 +344,21 @@ func runUpdate(args []string) error {
 		return err
 	}
 	defer lock.release()
+	if !fileExists(db) {
+		fts := hasFTS5()
+		if err := createEmptyIndexDB(db, root, "update", fts); err != nil {
+			return err
+		}
+	}
 	existing, err := loadIndexedFileStates(db)
 	if err != nil {
 		return err
 	}
+	meta, err := loadMeta(db)
+	if err != nil {
+		return err
+	}
+	candidates, candidateOnly := updateCandidatePaths(root, existing, meta)
 	fts, err := dbHasFTS5Tables(db)
 	if err != nil {
 		return err
@@ -377,7 +382,7 @@ func runUpdate(args []string) error {
 	var added, updated, deleted, unchanged int
 	var symbolCount, lineCount int
 	var codeLineCount, commentLineCount, blankLineCount int
-	err = walkGitTrackedFiles(root, ignored, *maxBytes, func(path string, info fs.FileInfo) error {
+	err = walkGitTrackedFileSet(root, ignored, *maxBytes, candidates, func(path string, info fs.FileInfo) error {
 		index, err := scanFileIndex(root, path, info, *maxBytes)
 		if err != nil {
 			return nil
@@ -409,6 +414,10 @@ func runUpdate(args []string) error {
 		if seen[rel] {
 			continue
 		}
+		if candidateOnly && !candidates[rel] {
+			unchanged++
+			continue
+		}
 		writeFileIndexDeleteSQL(writer, rel, fts)
 		deleted++
 	}
@@ -434,6 +443,45 @@ func runUpdate(args []string) error {
 	fmt.Printf("blank_lines: %d\n", blankLineCount)
 	fmt.Printf("hash_algorithm: %s\n", contentHashAlgorithm)
 	fmt.Printf("fts5: %s\n", yesNo(fts))
+	return nil
+}
+
+func createEmptyIndexDB(db, root, operation string, fts bool) error {
+	tmpDB, err := createTempDBPath(db)
+	if err != nil {
+		return err
+	}
+	installed := false
+	defer func() {
+		if !installed {
+			_ = removeDBFiles(tmpDB)
+		}
+	}()
+	writer, wait, err := sqliteWriter(tmpDB)
+	if err != nil {
+		return err
+	}
+	writerOK := false
+	defer func() {
+		if !writerOK {
+			_ = writer.Close()
+			_ = wait()
+		}
+	}()
+	writeSchema(writer, fts)
+	writeOperationMetaSQL(writer, root, operation, fts)
+	writeSQL(writer, "commit;\n")
+	if err := writer.Close(); err != nil {
+		return err
+	}
+	if err := wait(); err != nil {
+		return err
+	}
+	writerOK = true
+	if err := installBuiltDB(tmpDB, db); err != nil {
+		return err
+	}
+	installed = true
 	return nil
 }
 
