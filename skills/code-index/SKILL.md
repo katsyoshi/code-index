@@ -9,11 +9,11 @@ description: Build and use a local SQLite index for code navigation instead of a
 
 Use `code-index` as the first search surface for codebase navigation. Prefer SQL-backed queries for locating files, definitions, methods, classes, relevant source lines, metrics, and index status.
 
-Use an external `code-index` binary from an explicit `CODE_INDEX_BIN` path. If `CODE_INDEX_BIN` is not set, ask the user to install `code-index` and set `CODE_INDEX_BIN` to the binary path. If an agent runtime installs this skill with a bundled `scripts/code-index` helper, treat that helper only as a fallback because it may lag the standalone CLI.
+Use an external `code-index` binary from an explicit `CODE_INDEX_BIN` path. `code-index` may be on `PATH` for humans, but this skill must not search `PATH`. If `CODE_INDEX_BIN` is not set, ask the user to install `code-index` and configure `CODE_INDEX_BIN` in the environment used by their agent runtime.
 
 ## Install Guidance
 
-When `CODE_INDEX_BIN` is missing or points to a non-executable file, do not search `PATH`. Ask the user to install `code-index` under the directory containing this `SKILL.md`, then set `CODE_INDEX_BIN` to that binary path:
+When `CODE_INDEX_BIN` is missing or points to a non-executable file, do not search `PATH`. Ask the user to install `code-index` under the directory containing this `SKILL.md`, then configure `CODE_INDEX_BIN` in the environment used by their agent runtime:
 
 ```bash
 SKILL_DIR=/path/to/installed/skills/code-index
