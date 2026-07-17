@@ -200,6 +200,20 @@ func gitDiffNameOnly(root, oldRevision, newRevision string) ([]string, error) {
 	return gitNameOnly(root, "diff", "--name-only", "-z", "--no-renames", oldRevision, newRevision, "--", ".")
 }
 
+func gitCommitExists(root, revision string) (bool, error) {
+	if revision == "" {
+		return false, nil
+	}
+	if err := requireGitWorkTree(root); err != nil {
+		return false, err
+	}
+	cmd := exec.Command("git", "-C", root, "cat-file", "-e", revision+"^{commit}")
+	if err := cmd.Run(); err != nil {
+		return false, nil
+	}
+	return true, nil
+}
+
 func gitNameOnly(root string, args ...string) ([]string, error) {
 	cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
 	out, err := cmd.CombinedOutput()

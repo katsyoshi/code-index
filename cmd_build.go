@@ -98,14 +98,19 @@ type buildOptions struct {
 	db           string
 	maxBytes     int64
 	extraIgnored repeatedFlag
+	adopt        bool
 }
 
-func parseBuildOptions(commandName string, args []string) (buildOptions, error) {
+func parseBuildOptions(commandName string, args []string, allowAdopt bool) (buildOptions, error) {
 	flags := flag.NewFlagSet(commandName, flag.ExitOnError)
 	dbPath := flags.String("db", "", "database path")
 	maxBytes := flags.Int64("max-bytes", 1_000_000, "skip files larger than this")
+	adopt := false
 	var extraIgnored repeatedFlag
 	flags.Var(&extraIgnored, "ignore-dir", "extra directory name to ignore")
+	if allowAdopt {
+		flags.BoolVar(&adopt, "adopt", false, "adopt an index from another checkout or Git history")
+	}
 	if err := flags.Parse(args); err != nil {
 		return buildOptions{}, err
 	}
@@ -128,11 +133,12 @@ func parseBuildOptions(commandName string, args []string) (buildOptions, error) 
 		db:           db,
 		maxBytes:     *maxBytes,
 		extraIgnored: extraIgnored,
+		adopt:        adopt,
 	}, nil
 }
 
 func runRebuild(args []string) error {
-	options, err := parseBuildOptions("rebuild", args)
+	options, err := parseBuildOptions("rebuild", args, false)
 	if err != nil {
 		return err
 	}
@@ -223,7 +229,7 @@ func runRebuild(args []string) error {
 }
 
 func runUpdate(args []string) error {
-	options, err := parseBuildOptions("update", args)
+	options, err := parseBuildOptions("update", args, true)
 	if err != nil {
 		return err
 	}
@@ -250,11 +256,14 @@ func runUpdate(args []string) error {
 		return err
 	}
 	defer lock.release()
-	existing, err := loadIndexedFileStates(db)
+	meta, err := loadMeta(db)
 	if err != nil {
 		return err
 	}
-	meta, err := loadMeta(db)
+	if err := validateUpdateCompatibility(meta, root, options.adopt); err != nil {
+		return err
+	}
+	existing, err := loadIndexedFileStates(db)
 	if err != nil {
 		return err
 	}
@@ -331,6 +340,36 @@ func runUpdate(args []string) error {
 	fmt.Printf("symbols: %d\n", symbolCount)
 	fmt.Printf("hash_algorithm: %s\n", contentHashAlgorithm)
 	fmt.Printf("fts5: %s\n", yesNo(fts))
+	return nil
+}
+
+func validateUpdateCompatibility(meta map[string]string, root string, adopt bool) error {
+	if got := meta["schema_version"]; got != "" && got != schemaVersion {
+		return fmt.Errorf("index schema is incompatible: db schema_version=%s, tool schema_version=%s; run rebuild", got, schemaVersion)
+	}
+	if got := meta["file_source"]; got != "" && got != fileSource {
+		return fmt.Errorf("index file source is incompatible: db file_source=%s, tool file_source=%s; run rebuild", got, fileSource)
+	}
+	if got := meta["hash_algorithm"]; got != "" && got != contentHashAlgorithm {
+		return fmt.Errorf("index hash algorithm is incompatible: db hash_algorithm=%s, tool hash_algorithm=%s; run rebuild", got, contentHashAlgorithm)
+	}
+	indexedRoot := meta["root"]
+	if indexedRoot != "" && indexedRoot != root && !adopt {
+		return fmt.Errorf("index belongs to a different checkout: indexed_root=%s current_root=%s; run rebuild, or run update --adopt if this DB should belong to the current checkout", indexedRoot, root)
+	}
+	indexedHead := meta["vcs_head"]
+	if indexedHead == "" {
+		indexedHead = meta["vcs_revision"]
+	}
+	if indexedHead != "" && !adopt {
+		exists, err := gitCommitExists(root, indexedHead)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			return fmt.Errorf("index belongs to an unknown Git history: indexed_head=%s; run rebuild, or run update --adopt if this DB should belong to the current checkout", indexedHead)
+		}
+	}
 	return nil
 }
 

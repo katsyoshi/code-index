@@ -78,6 +78,8 @@ If `update` reports that the index does not exist yet, run `rebuild` explicitly:
 "$TOOL" rebuild "$PWD"
 ```
 
+If `update` reports incompatible schema, file source, or hash settings, run `rebuild`. If it reports another checkout path or unknown Git history, run `rebuild` unless the user explicitly wants this DB to belong to the current checkout; only then use `update --adopt`.
+
 6. Check status when lock or freshness may matter:
 
 ```bash
@@ -140,6 +142,9 @@ Common commands:
 
 # Incrementally refresh an existing index from Git-tracked files.
 "$TOOL" update "$PWD"
+
+# Adopt an index from another checkout path or Git history only when intentional.
+"$TOOL" update --adopt "$PWD"
 
 # Show lock state and metadata from the last successful update.
 "$TOOL" status --root "$PWD"

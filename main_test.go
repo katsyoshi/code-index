@@ -605,6 +605,99 @@ func TestUpdateCommandIndexesInitializedDB(t *testing.T) {
 	assertSQLiteValue(t, db, "select count(*) from symbols where name = 'main';", "1")
 }
 
+func TestUpdateRejectsDifferentRootUnlessAdopted(t *testing.T) {
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		t.Skip("sqlite3 command not found")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git command not found")
+	}
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	initGitRepo(t, root, "main.go")
+	runGit(t, root, "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "initial")
+	db := filepath.Join(t.TempDir(), "index.sqlite")
+	if err := run([]string{"rebuild", "--db", db, root}); err != nil {
+		t.Fatal(err)
+	}
+	otherRoot := filepath.Join(t.TempDir(), "checkout")
+	if err := os.Symlink(root, otherRoot); err != nil {
+		t.Fatal(err)
+	}
+
+	err := run([]string{"update", "--db", db, otherRoot})
+	if err == nil {
+		t.Fatal("update with different root succeeded, want failure")
+	}
+	if !strings.Contains(err.Error(), "different checkout") || !strings.Contains(err.Error(), "update --adopt") {
+		t.Fatalf("error = %q, want checkout mismatch with adopt guidance", err)
+	}
+	if err := run([]string{"update", "--db", db, "--adopt", otherRoot}); err != nil {
+		t.Fatal(err)
+	}
+	assertMetaValue(t, db, "root", otherRoot)
+}
+
+func TestUpdateRejectsUnknownHistoryUnlessAdopted(t *testing.T) {
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		t.Skip("sqlite3 command not found")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git command not found")
+	}
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	initGitRepo(t, root, "main.go")
+	runGit(t, root, "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "initial")
+	db := filepath.Join(t.TempDir(), "index.sqlite")
+	if err := run([]string{"rebuild", "--db", db, root}); err != nil {
+		t.Fatal(err)
+	}
+	assertSQLiteValue(t, db, "update meta set value = '0000000000000000000000000000000000000000' where key in ('vcs_head', 'vcs_revision'); select changes();", "2")
+
+	err := run([]string{"update", "--db", db, root})
+	if err == nil {
+		t.Fatal("update with unknown history succeeded, want failure")
+	}
+	if !strings.Contains(err.Error(), "unknown Git history") || !strings.Contains(err.Error(), "update --adopt") {
+		t.Fatalf("error = %q, want history mismatch with adopt guidance", err)
+	}
+	if err := run([]string{"update", "--db", db, "--adopt", root}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestUpdateAdoptDoesNotBypassSchemaMismatch(t *testing.T) {
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		t.Skip("sqlite3 command not found")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git command not found")
+	}
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	initGitRepo(t, root, "main.go")
+	db := filepath.Join(t.TempDir(), "index.sqlite")
+	if err := run([]string{"rebuild", "--db", db, root}); err != nil {
+		t.Fatal(err)
+	}
+	assertSQLiteValue(t, db, "update meta set value = '0' where key = 'schema_version'; select changes();", "1")
+
+	err := run([]string{"update", "--db", db, "--adopt", root})
+	if err == nil {
+		t.Fatal("update --adopt with schema mismatch succeeded, want failure")
+	}
+	if !strings.Contains(err.Error(), "schema is incompatible") || !strings.Contains(err.Error(), "run rebuild") {
+		t.Fatalf("error = %q, want schema mismatch with rebuild guidance", err)
+	}
+}
+
 func TestRebuildRequiresGitWorkTree(t *testing.T) {
 	if _, err := exec.LookPath("sqlite3"); err != nil {
 		t.Skip("sqlite3 command not found")

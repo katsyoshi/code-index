@@ -21,7 +21,7 @@ var commands = []command{
 	{name: "path", usage: "code-index path ROOT", summary: "print the default database path for a root"},
 	{name: "init", usage: "code-index init [--db DB] ROOT", summary: "initialize an empty index database"},
 	{name: "rebuild", usage: "code-index rebuild [--db DB] [--max-bytes N] ROOT", summary: "atomically rebuild the full index"},
-	{name: "update", usage: "code-index update [--db DB] [--max-bytes N] ROOT", summary: "create or incrementally refresh the index"},
+	{name: "update", usage: "code-index update [--db DB] [--max-bytes N] [--adopt] ROOT", summary: "create or incrementally refresh the index"},
 	{name: "defs", usage: "code-index defs [--root ROOT|--db DB] [--kind KIND] [--language LANG] QUERY", summary: "find symbol definitions"},
 	{name: "files", usage: "code-index files [--root ROOT|--db DB] [--language LANG] QUERY", summary: "find indexed files"},
 	{name: "sql", usage: "code-index sql [--root ROOT|--db DB] [SQL]", summary: "run read-only SQL"},
