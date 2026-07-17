@@ -93,29 +93,51 @@ func cmdUpdate(args []string) error {
 	return runUpdate(args)
 }
 
-func runRebuild(args []string) error {
-	flags := flag.NewFlagSet("rebuild", flag.ExitOnError)
+type buildOptions struct {
+	root         string
+	db           string
+	maxBytes     int64
+	extraIgnored repeatedFlag
+}
+
+func parseBuildOptions(commandName string, args []string) (buildOptions, error) {
+	flags := flag.NewFlagSet(commandName, flag.ExitOnError)
 	dbPath := flags.String("db", "", "database path")
 	maxBytes := flags.Int64("max-bytes", 1_000_000, "skip files larger than this")
 	var extraIgnored repeatedFlag
 	flags.Var(&extraIgnored, "ignore-dir", "extra directory name to ignore")
 	if err := flags.Parse(args); err != nil {
-		return err
+		return buildOptions{}, err
 	}
 	if flags.NArg() != 1 {
-		return errors.New(commandUsage("rebuild"))
+		return buildOptions{}, errors.New(commandUsage(commandName))
 	}
 	if _, err := exec.LookPath("sqlite3"); err != nil {
-		return errors.New("sqlite3 command not found")
+		return buildOptions{}, errors.New("sqlite3 command not found")
 	}
 	root, err := resolveRoot(flags.Arg(0))
 	if err != nil {
-		return err
+		return buildOptions{}, err
 	}
 	db := *dbPath
 	if db == "" {
 		db = defaultDBPath(root)
 	}
+	return buildOptions{
+		root:         root,
+		db:           db,
+		maxBytes:     *maxBytes,
+		extraIgnored: extraIgnored,
+	}, nil
+}
+
+func runRebuild(args []string) error {
+	options, err := parseBuildOptions("rebuild", args)
+	if err != nil {
+		return err
+	}
+	root := options.root
+	db := options.db
 	if err := os.MkdirAll(filepath.Dir(db), 0o755); err != nil {
 		return err
 	}
@@ -151,13 +173,13 @@ func runRebuild(args []string) error {
 		}
 	}()
 	writeSchema(writer, fts)
-	ignored := cloneIgnored(extraIgnored)
+	ignored := cloneIgnored(options.extraIgnored)
 	var fileCount, symbolCount, lineCount int
 	var codeLineCount, commentLineCount, blankLineCount int
 	nextFileID := 1
 	nextSymbolID := 1
-	err = walkGitTrackedFiles(root, ignored, *maxBytes, func(path string, info fs.FileInfo) error {
-		index, err := scanFileIndex(root, path, info, *maxBytes)
+	err = walkGitTrackedFiles(root, ignored, options.maxBytes, func(path string, info fs.FileInfo) error {
+		index, err := scanFileIndex(root, path, info, options.maxBytes)
 		if err != nil {
 			return nil
 		}
@@ -201,28 +223,12 @@ func runRebuild(args []string) error {
 }
 
 func runUpdate(args []string) error {
-	flags := flag.NewFlagSet("update", flag.ExitOnError)
-	dbPath := flags.String("db", "", "database path")
-	maxBytes := flags.Int64("max-bytes", 1_000_000, "skip files larger than this")
-	var extraIgnored repeatedFlag
-	flags.Var(&extraIgnored, "ignore-dir", "extra directory name to ignore")
-	if err := flags.Parse(args); err != nil {
-		return err
-	}
-	if flags.NArg() != 1 {
-		return errors.New(commandUsage("update"))
-	}
-	if _, err := exec.LookPath("sqlite3"); err != nil {
-		return errors.New("sqlite3 command not found")
-	}
-	root, err := resolveRoot(flags.Arg(0))
+	options, err := parseBuildOptions("update", args)
 	if err != nil {
 		return err
 	}
-	db := *dbPath
-	if db == "" {
-		db = defaultDBPath(root)
-	}
+	root := options.root
+	db := options.db
 	if !fileExists(db) {
 		if _, locked, err := readActiveIndexLock(db); err != nil {
 			return err
@@ -271,12 +277,12 @@ func runUpdate(args []string) error {
 	writeSQL(writer, ".bail on\n")
 	writeSQL(writer, ".timeout 5000\n")
 	writeSQL(writer, "begin immediate;\n")
-	ignored := cloneIgnored(extraIgnored)
+	ignored := cloneIgnored(options.extraIgnored)
 	seen := map[string]bool{}
 	var added, updated, deleted int
 	var symbolCount int
-	err = walkGitTrackedFileSet(root, ignored, *maxBytes, candidates, func(path string, info fs.FileInfo) error {
-		index, err := scanFileIndex(root, path, info, *maxBytes)
+	err = walkGitTrackedFileSet(root, ignored, options.maxBytes, candidates, func(path string, info fs.FileInfo) error {
+		index, err := scanFileIndex(root, path, info, options.maxBytes)
 		if err != nil {
 			return nil
 		}
