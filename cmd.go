@@ -12,49 +12,121 @@ import (
 	"strings"
 )
 
+type command struct {
+	name    string
+	usage   string
+	summary string
+}
+
+var commands = []command{
+	{name: "help", usage: "code-index help [COMMAND]", summary: "show command help"},
+	{name: "version", usage: "code-index version", summary: "show build and schema information"},
+	{name: "path", usage: "code-index path ROOT", summary: "print the default database path for a root"},
+	{name: "init", usage: "code-index init [--db DB] ROOT", summary: "initialize an empty index database"},
+	{name: "rebuild", usage: "code-index rebuild [--db DB] [--max-bytes N] ROOT", summary: "atomically rebuild the full index"},
+	{name: "update", usage: "code-index update [--db DB] [--max-bytes N] ROOT", summary: "create or incrementally refresh the index"},
+	{name: "defs", usage: "code-index defs [--root ROOT|--db DB] [--kind KIND] [--language LANG] QUERY", summary: "find symbol definitions"},
+	{name: "files", usage: "code-index files [--root ROOT|--db DB] [--language LANG] QUERY", summary: "find indexed files"},
+	{name: "sql", usage: "code-index sql [--root ROOT|--db DB] [SQL]", summary: "run read-only SQL"},
+	{name: "show", usage: "code-index show [--root ROOT|--db DB] --line N [--context N] PATH", summary: "show indexed source around a line"},
+	{name: "stats", usage: "code-index stats [--root ROOT|--db DB]", summary: "show index table counts"},
+	{name: "metrics", usage: "code-index metrics [--root ROOT|--db DB] [--language LANG] [--limit N] [PATH_QUERY]", summary: "show indexed code metrics"},
+	{name: "status", usage: "code-index status [--root ROOT|--db DB]", summary: "show index metadata, lock state, and freshness"},
+}
+
 func run(args []string) error {
 	if len(args) == 0 {
-		usage()
+		printUsage(os.Stderr)
 		return errors.New("missing command")
 	}
-	switch args[0] {
+	if handler := commandHandler(args[0]); handler != nil {
+		return handler(args[1:])
+	}
+	printUsage(os.Stderr)
+	return fmt.Errorf("unknown command: %s", args[0])
+}
+
+func commandHandler(name string) func([]string) error {
+	switch name {
+	case "help":
+		return cmdHelp
 	case "version":
-		return cmdVersion(args[1:])
+		return cmdVersion
 	case "path":
-		return cmdPath(args[1:])
+		return cmdPath
 	case "init":
-		return cmdInit(args[1:])
+		return cmdInit
 	case "rebuild":
-		return cmdRebuild(args[1:])
+		return cmdRebuild
 	case "update":
-		return cmdUpdate(args[1:])
+		return cmdUpdate
 	case "defs":
-		return cmdDefs(args[1:])
+		return cmdDefs
 	case "files":
-		return cmdFiles(args[1:])
+		return cmdFiles
 	case "sql":
-		return cmdSQL(args[1:])
+		return cmdSQL
 	case "show":
-		return cmdShow(args[1:])
+		return cmdShow
 	case "stats":
-		return cmdStats(args[1:])
+		return cmdStats
 	case "metrics":
-		return cmdMetrics(args[1:])
+		return cmdMetrics
 	case "status":
-		return cmdStatus(args[1:])
+		return cmdStatus
 	default:
-		usage()
-		return fmt.Errorf("unknown command: %s", args[0])
+		return nil
 	}
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: code-index <version|path|init|rebuild|update|defs|files|sql|show|stats|metrics|status> [options]")
+	printUsage(os.Stderr)
+}
+
+func printUsage(w io.Writer) {
+	names := make([]string, 0, len(commands))
+	for _, cmd := range commands {
+		names = append(names, cmd.name)
+	}
+	fmt.Fprintf(w, "usage: code-index <%s> [options]\n", strings.Join(names, "|"))
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Commands:")
+	for _, cmd := range commands {
+		fmt.Fprintf(w, "  %-8s %s\n", cmd.name, cmd.summary)
+	}
+}
+
+func commandUsage(name string) string {
+	for _, cmd := range commands {
+		if cmd.name == name {
+			return "usage: " + cmd.usage
+		}
+	}
+	return "usage: code-index " + name
+}
+
+func cmdHelp(args []string) error {
+	if len(args) == 0 {
+		printUsage(os.Stdout)
+		return nil
+	}
+	if len(args) != 1 {
+		return errors.New(commandUsage("help"))
+	}
+	for _, cmd := range commands {
+		if cmd.name == args[0] {
+			fmt.Println("usage: " + cmd.usage)
+			fmt.Println()
+			fmt.Println(cmd.summary)
+			return nil
+		}
+	}
+	return fmt.Errorf("unknown command: %s", args[0])
 }
 
 func cmdVersion(args []string) error {
 	if len(args) != 0 {
-		return errors.New("usage: code-index version")
+		return errors.New(commandUsage("version"))
 	}
 	info := currentBuildInfo()
 	fmt.Println("key\tvalue")
@@ -69,7 +141,7 @@ func cmdVersion(args []string) error {
 
 func cmdPath(args []string) error {
 	if len(args) != 1 {
-		return errors.New("usage: code-index path ROOT")
+		return errors.New(commandUsage("path"))
 	}
 	root, err := filepath.Abs(args[0])
 	if err != nil {
@@ -86,7 +158,7 @@ func cmdInit(args []string) error {
 		return err
 	}
 	if flags.NArg() != 1 {
-		return errors.New("usage: code-index init [--db DB] ROOT")
+		return errors.New(commandUsage("init"))
 	}
 	if _, err := exec.LookPath("sqlite3"); err != nil {
 		return errors.New("sqlite3 command not found")
@@ -191,7 +263,7 @@ func runRebuild(args []string) error {
 		return err
 	}
 	if flags.NArg() != 1 {
-		return errors.New("usage: code-index rebuild [--db DB] [--max-bytes N] ROOT")
+		return errors.New(commandUsage("rebuild"))
 	}
 	if _, err := exec.LookPath("sqlite3"); err != nil {
 		return errors.New("sqlite3 command not found")
@@ -305,7 +377,7 @@ func runUpdate(args []string) error {
 		return err
 	}
 	if flags.NArg() != 1 {
-		return errors.New("usage: code-index update [--db DB] [--max-bytes N] ROOT")
+		return errors.New(commandUsage("update"))
 	}
 	if _, err := exec.LookPath("sqlite3"); err != nil {
 		return errors.New("sqlite3 command not found")
@@ -477,7 +549,7 @@ func cmdDefs(args []string) error {
 		return err
 	}
 	if fs.NArg() != 1 {
-		return errors.New("usage: code-index defs [--root ROOT|--db DB] [--kind KIND] [--language LANG] QUERY")
+		return errors.New(commandUsage("defs"))
 	}
 	query := fs.Arg(0)
 	where := "(name = " + quote(query) + " collate nocase or name like " + quote(query+"%") + " collate nocase or signature like " + quote("%"+query+"%") + " collate nocase or path like " + quote("%"+query+"%") + " collate nocase)"
@@ -501,7 +573,7 @@ func cmdFiles(args []string) error {
 		return err
 	}
 	if fs.NArg() != 1 {
-		return errors.New("usage: code-index files [--root ROOT|--db DB] [--language LANG] QUERY")
+		return errors.New(commandUsage("files"))
 	}
 	query := fs.Arg(0)
 	where := "path like " + quote("%"+query+"%") + " collate nocase"
@@ -529,7 +601,7 @@ func cmdSQL(args []string) error {
 	} else if fs.NArg() == 1 {
 		query = fs.Arg(0)
 	} else {
-		return errors.New("usage: code-index sql [--root ROOT|--db DB] [SQL]")
+		return errors.New(commandUsage("sql"))
 	}
 	if err := validateReadOnlySQL(query); err != nil {
 		return err
@@ -547,7 +619,7 @@ func cmdShow(args []string) error {
 		return err
 	}
 	if fs.NArg() != 1 || *line <= 0 {
-		return errors.New("usage: code-index show [--root ROOT|--db DB] --line N [--context N] PATH")
+		return errors.New(commandUsage("show"))
 	}
 	path := strings.TrimPrefix(filepath.ToSlash(fs.Arg(0)), "/")
 	start := *line - *context
@@ -579,7 +651,7 @@ func cmdMetrics(args []string) error {
 		return err
 	}
 	if fs.NArg() > 1 {
-		return errors.New("usage: code-index metrics [--root ROOT|--db DB] [--language LANG] [--limit N] [PATH_QUERY]")
+		return errors.New(commandUsage("metrics"))
 	}
 	where := "1 = 1"
 	if *language != "" {
@@ -604,7 +676,7 @@ func cmdStatus(args []string) error {
 		return err
 	}
 	if fs.NArg() != 0 {
-		return errors.New("usage: code-index status [--root ROOT|--db DB]")
+		return errors.New(commandUsage("status"))
 	}
 	db := requiredDB(*dbFlag, *root)
 	dbExists := fileExists(db)

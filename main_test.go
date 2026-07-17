@@ -95,6 +95,20 @@ func TestVersionCommand(t *testing.T) {
 	}
 }
 
+func TestHelpCommand(t *testing.T) {
+	out := captureRunOutput(t, []string{"help"})
+	if !strings.Contains(out, "Commands:") || !strings.Contains(out, "update") {
+		t.Fatalf("help output = %q, want command list", out)
+	}
+	out = captureRunOutput(t, []string{"help", "update"})
+	if !strings.Contains(out, "usage: code-index update") {
+		t.Fatalf("help update output = %q, want update usage", out)
+	}
+	if err := run([]string{"help", "missing"}); err == nil {
+		t.Fatal("help missing succeeded, want failure")
+	}
+}
+
 func TestIndexLockPreventsConcurrentBuilds(t *testing.T) {
 	db := filepath.Join(t.TempDir(), "index.sqlite")
 	lock, err := acquireIndexLock(db, "rebuild", "/repo")

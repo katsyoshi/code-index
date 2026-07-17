@@ -116,6 +116,10 @@ If `status` is unsupported, continue with query commands and rely on rebuild out
 Common commands:
 
 ```bash
+# Show command help.
+"$TOOL" help
+"$TOOL" help update
+
 # Print the default database path for a root.
 "$TOOL" path "$PWD"
 
