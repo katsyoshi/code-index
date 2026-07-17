@@ -22,16 +22,9 @@ func cmdInit(args []string) error {
 	if _, err := exec.LookPath("sqlite3"); err != nil {
 		return errors.New("sqlite3 command not found")
 	}
-	root, err := filepath.Abs(flags.Arg(0))
+	root, err := resolveRoot(flags.Arg(0))
 	if err != nil {
 		return err
-	}
-	info, err := os.Stat(root)
-	if err != nil {
-		return err
-	}
-	if !info.IsDir() {
-		return fmt.Errorf("not a directory: %s", root)
 	}
 	db := *dbPath
 	if db == "" {
@@ -77,6 +70,21 @@ func ensureIndexDoesNotExist(db string) error {
 	return nil
 }
 
+func resolveRoot(path string) (string, error) {
+	root, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Stat(root)
+	if err != nil {
+		return "", err
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("not a directory: %s", root)
+	}
+	return root, nil
+}
+
 func cmdRebuild(args []string) error {
 	return runRebuild(args)
 }
@@ -100,16 +108,9 @@ func runRebuild(args []string) error {
 	if _, err := exec.LookPath("sqlite3"); err != nil {
 		return errors.New("sqlite3 command not found")
 	}
-	root, err := filepath.Abs(flags.Arg(0))
+	root, err := resolveRoot(flags.Arg(0))
 	if err != nil {
 		return err
-	}
-	info, err := os.Stat(root)
-	if err != nil {
-		return err
-	}
-	if !info.IsDir() {
-		return fmt.Errorf("not a directory: %s", root)
 	}
 	db := *dbPath
 	if db == "" {
@@ -214,16 +215,9 @@ func runUpdate(args []string) error {
 	if _, err := exec.LookPath("sqlite3"); err != nil {
 		return errors.New("sqlite3 command not found")
 	}
-	root, err := filepath.Abs(flags.Arg(0))
+	root, err := resolveRoot(flags.Arg(0))
 	if err != nil {
 		return err
-	}
-	info, err := os.Stat(root)
-	if err != nil {
-		return err
-	}
-	if !info.IsDir() {
-		return fmt.Errorf("not a directory: %s", root)
 	}
 	db := *dbPath
 	if db == "" {
