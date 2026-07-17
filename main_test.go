@@ -423,6 +423,8 @@ func TestInitCommandCreatesEmptySQLiteIndexAndFailsIfExists(t *testing.T) {
 	assertMetaValue(t, db, "schema_version", schemaVersion)
 	assertMetaValue(t, db, "file_source", fileSource)
 	assertMetaValue(t, db, "hash_algorithm", contentHashAlgorithm)
+	assertMetaValue(t, db, "config_max_bytes", int64Text(defaultMaxBytes))
+	assertMetaValue(t, db, "config_ignore_dirs", stringListText(ignoredDirNames(nil)))
 	assertMetaValue(t, db, "last_operation", "init")
 	assertSQLiteValue(t, db, "select count(*) from meta where key = 'indexed_at' and value != '';", "1")
 	assertSQLiteValue(t, db, "select count(*) from meta where key = 'updated_at' and value != '';", "1")
@@ -471,6 +473,8 @@ func TestRebuildCommandCreatesSQLiteIndex(t *testing.T) {
 	assertMetaValue(t, db, "schema_version", schemaVersion)
 	assertMetaValue(t, db, "file_source", fileSource)
 	assertMetaValue(t, db, "hash_algorithm", contentHashAlgorithm)
+	assertMetaValue(t, db, "config_max_bytes", int64Text(defaultMaxBytes))
+	assertMetaValue(t, db, "config_ignore_dirs", stringListText(ignoredDirNames(nil)))
 	assertMetaValue(t, db, "last_operation", "rebuild")
 	assertMetaValue(t, db, "vcs_kind", "git")
 	assertSQLiteValue(t, db, "select count(*) from symbols where name = 'untracked';", "0")
@@ -740,6 +744,43 @@ func TestUpdateAdoptDoesNotBypassSchemaMismatch(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "schema is incompatible") || !strings.Contains(err.Error(), "run rebuild") {
 		t.Fatalf("error = %q, want schema mismatch with rebuild guidance", err)
+	}
+}
+
+func TestUpdateRejectsConfigMismatch(t *testing.T) {
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		t.Skip("sqlite3 command not found")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git command not found")
+	}
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	initGitRepo(t, root, "main.go")
+	db := filepath.Join(t.TempDir(), "index.sqlite")
+	if err := run([]string{"rebuild", "--db", db, "--max-bytes", "12345", root}); err != nil {
+		t.Fatal(err)
+	}
+	assertMetaValue(t, db, "config_max_bytes", "12345")
+
+	err := run([]string{"update", "--db", db, root})
+	if err == nil {
+		t.Fatal("update with max-bytes mismatch succeeded, want failure")
+	}
+	if !strings.Contains(err.Error(), "max bytes setting is incompatible") || !strings.Contains(err.Error(), "run rebuild") {
+		t.Fatalf("error = %q, want max bytes mismatch with rebuild guidance", err)
+	}
+	out := captureRunOutput(t, []string{"status", "--db", db, "--root", root})
+	for _, want := range []string{
+		"update_compatible\tno",
+		"update_rebuild_required\tyes",
+		"update_blocker\tconfig_max_bytes",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("status output = %q, want %s", out, want)
+		}
 	}
 }
 

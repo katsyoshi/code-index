@@ -73,7 +73,7 @@ Update an existing index incrementally:
 
 `update` requires an existing index database and a Git work tree. It refreshes changed Git-tracked files and removes files that are no longer tracked. If the index does not exist yet, run `init` or `rebuild` first.
 
-`update` refuses incompatible indexes instead of silently mixing metadata. It asks for `rebuild` when schema, file source, or hash settings do not match. If the database was created from another checkout path or Git history and you intentionally want this checkout to take it over, run:
+`update` refuses incompatible indexes instead of silently mixing metadata. It asks for `rebuild` when schema, file source, hash, or indexing config settings do not match. If the database was created from another checkout path or Git history and you intentionally want this checkout to take it over, run:
 
 ```sh
 ./code-index update --adopt /path/to/repo

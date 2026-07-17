@@ -45,7 +45,7 @@ func cmdInit(args []string) error {
 		return err
 	}
 	fts := hasFTS5()
-	if err := createEmptyIndexDB(db, root, "init", fts); err != nil {
+	if err := createEmptyIndexDB(db, root, "init", fts, defaultBuildConfig()); err != nil {
 		return err
 	}
 	fmt.Printf("db: %s\n", db)
@@ -104,7 +104,7 @@ type buildOptions struct {
 func parseBuildOptions(commandName string, args []string, allowAdopt bool) (buildOptions, error) {
 	flags := flag.NewFlagSet(commandName, flag.ExitOnError)
 	dbPath := flags.String("db", "", "database path")
-	maxBytes := flags.Int64("max-bytes", 1_000_000, "skip files larger than this")
+	maxBytes := flags.Int64("max-bytes", defaultMaxBytes, "skip files larger than this")
 	adopt := false
 	var extraIgnored repeatedFlag
 	flags.Var(&extraIgnored, "ignore-dir", "extra directory name to ignore")
@@ -135,6 +135,13 @@ func parseBuildOptions(commandName string, args []string, allowAdopt bool) (buil
 		extraIgnored: extraIgnored,
 		adopt:        adopt,
 	}, nil
+}
+
+func (o buildOptions) config() buildConfig {
+	return buildConfig{
+		maxBytes:   o.maxBytes,
+		ignoreDirs: ignoredDirNames(o.extraIgnored),
+	}
 }
 
 func runRebuild(args []string) error {
@@ -202,7 +209,7 @@ func runRebuild(args []string) error {
 	if err != nil {
 		return err
 	}
-	writeOperationMetaSQL(writer, root, "rebuild", fts)
+	writeOperationMetaSQL(writer, root, "rebuild", fts, options.config())
 	writeSQL(writer, "commit;\n")
 	if err := writer.Close(); err != nil {
 		return err
@@ -260,7 +267,7 @@ func runUpdate(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := validateUpdateCompatibility(meta, root, options.adopt); err != nil {
+	if err := validateUpdateCompatibility(meta, root, options.config(), options.adopt); err != nil {
 		return err
 	}
 	existing, err := loadIndexedFileStates(db)
@@ -323,7 +330,7 @@ func runUpdate(args []string) error {
 		writeFileIndexDeleteSQL(writer, rel, fts)
 		deleted++
 	}
-	writeOperationMetaSQL(writer, root, "update", fts)
+	writeOperationMetaSQL(writer, root, "update", fts, options.config())
 	writeSQL(writer, "commit;\n")
 	if err := writer.Close(); err != nil {
 		return err
@@ -343,8 +350,8 @@ func runUpdate(args []string) error {
 	return nil
 }
 
-func validateUpdateCompatibility(meta map[string]string, root string, adopt bool) error {
-	compatibility, err := checkUpdateCompatibility(meta, root)
+func validateUpdateCompatibility(meta map[string]string, root string, config buildConfig, adopt bool) error {
+	compatibility, err := checkUpdateCompatibility(meta, root, config)
 	if err != nil {
 		return err
 	}
@@ -358,6 +365,10 @@ func validateUpdateCompatibility(meta map[string]string, root string, adopt bool
 		return fmt.Errorf("index file source is incompatible: db file_source=%s, tool file_source=%s; run rebuild", meta["file_source"], fileSource)
 	case "hash_algorithm":
 		return fmt.Errorf("index hash algorithm is incompatible: db hash_algorithm=%s, tool hash_algorithm=%s; run rebuild", meta["hash_algorithm"], contentHashAlgorithm)
+	case "config_max_bytes":
+		return fmt.Errorf("index max bytes setting is incompatible: db config_max_bytes=%s, requested config_max_bytes=%s; run rebuild", meta["config_max_bytes"], int64Text(config.maxBytes))
+	case "config_ignore_dirs":
+		return fmt.Errorf("index ignore dirs setting is incompatible: db config_ignore_dirs=%s, requested config_ignore_dirs=%s; run rebuild", meta["config_ignore_dirs"], stringListText(config.ignoreDirs))
 	case "different_checkout":
 		return fmt.Errorf("index belongs to a different checkout: indexed_root=%s current_root=%s; run rebuild, or run update --adopt if this DB should belong to the current checkout", meta["root"], root)
 	case "unknown_git_history":
@@ -378,7 +389,7 @@ type updateCompatibility struct {
 	blocker         string
 }
 
-func checkUpdateCompatibility(meta map[string]string, root string) (updateCompatibility, error) {
+func checkUpdateCompatibility(meta map[string]string, root string, config buildConfig) (updateCompatibility, error) {
 	if got := meta["schema_version"]; got != "" && got != schemaVersion {
 		return updateCompatibility{rebuildRequired: true, blocker: "schema_version"}, nil
 	}
@@ -387,6 +398,12 @@ func checkUpdateCompatibility(meta map[string]string, root string) (updateCompat
 	}
 	if got := meta["hash_algorithm"]; got != "" && got != contentHashAlgorithm {
 		return updateCompatibility{rebuildRequired: true, blocker: "hash_algorithm"}, nil
+	}
+	if got := meta["config_max_bytes"]; got != "" && got != int64Text(config.maxBytes) {
+		return updateCompatibility{rebuildRequired: true, blocker: "config_max_bytes"}, nil
+	}
+	if got := meta["config_ignore_dirs"]; got != "" && got != stringListText(config.ignoreDirs) {
+		return updateCompatibility{rebuildRequired: true, blocker: "config_ignore_dirs"}, nil
 	}
 	indexedRoot := meta["root"]
 	if indexedRoot != "" && indexedRoot != root {
@@ -408,7 +425,7 @@ func checkUpdateCompatibility(meta map[string]string, root string) (updateCompat
 	return updateCompatibility{compatible: true}, nil
 }
 
-func createEmptyIndexDB(db, root, operation string, fts bool) error {
+func createEmptyIndexDB(db, root, operation string, fts bool, config buildConfig) error {
 	tmpDB, err := createTempDBPath(db)
 	if err != nil {
 		return err
@@ -431,7 +448,7 @@ func createEmptyIndexDB(db, root, operation string, fts bool) error {
 		}
 	}()
 	writeSchema(writer, fts)
-	writeOperationMetaSQL(writer, root, operation, fts)
+	writeOperationMetaSQL(writer, root, operation, fts, config)
 	writeSQL(writer, "commit;\n")
 	if err := writer.Close(); err != nil {
 		return err

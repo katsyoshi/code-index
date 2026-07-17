@@ -1,9 +1,13 @@
 package main
 
 import (
+	"encoding/json"
 	"sort"
+	"strconv"
 	"strings"
 )
+
+const defaultMaxBytes int64 = 1_000_000
 
 type repeatedFlag []string
 
@@ -37,20 +41,42 @@ func yesNo(v bool) string {
 	return "no"
 }
 
-func cloneIgnored(extra []string) map[string]bool {
-	out := make(map[string]bool, len(ignoredDirs)+len(extra))
+func int64Text(v int64) string {
+	return strconv.FormatInt(v, 10)
+}
+
+func stringListText(values []string) string {
+	data, err := json.Marshal(values)
+	if err != nil {
+		return "[]"
+	}
+	return string(data)
+}
+
+func ignoredDirNames(extra []string) []string {
+	values := make(map[string]bool, len(ignoredDirs)+len(extra))
 	for name, value := range ignoredDirs {
-		out[name] = value
+		if value {
+			values[name] = true
+		}
 	}
 	for _, name := range extra {
 		if name != "" {
-			out[name] = true
+			values[name] = true
 		}
 	}
-	keys := make([]string, 0, len(out))
-	for key := range out {
-		keys = append(keys, key)
+	names := make([]string, 0, len(values))
+	for name := range values {
+		names = append(names, name)
 	}
-	sort.Strings(keys)
+	sort.Strings(names)
+	return names
+}
+
+func cloneIgnored(extra []string) map[string]bool {
+	out := make(map[string]bool, len(ignoredDirs)+len(extra))
+	for _, name := range ignoredDirNames(extra) {
+		out[name] = true
+	}
 	return out
 }

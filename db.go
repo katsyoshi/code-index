@@ -132,13 +132,27 @@ type metaPair struct {
 	value string
 }
 
-func writeOperationMetaSQL(w io.Writer, root, operation string, fts bool) {
+type buildConfig struct {
+	maxBytes   int64
+	ignoreDirs []string
+}
+
+func defaultBuildConfig() buildConfig {
+	return buildConfig{
+		maxBytes:   defaultMaxBytes,
+		ignoreDirs: ignoredDirNames(nil),
+	}
+}
+
+func writeOperationMetaSQL(w io.Writer, root, operation string, fts bool, config buildConfig) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	pairs := []metaPair{
 		{"schema_version", schemaVersion},
 		{"root", root},
 		{"file_source", fileSource},
 		{"hash_algorithm", contentHashAlgorithm},
+		{"config_max_bytes", int64Text(config.maxBytes)},
+		{"config_ignore_dirs", stringListText(config.ignoreDirs)},
 		{"fts5", boolText(fts)},
 		{"indexed_at", now},
 		{"updated_at", now},

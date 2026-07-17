@@ -78,7 +78,7 @@ If `update` reports that the index does not exist yet, run `rebuild` explicitly:
 "$TOOL" rebuild "$PWD"
 ```
 
-If `update` reports incompatible schema, file source, or hash settings, run `rebuild`. If it reports another checkout path or unknown Git history, run `rebuild` unless the user explicitly wants this DB to belong to the current checkout; only then use `update --adopt`.
+If `update` reports incompatible schema, file source, hash, or indexing config settings, run `rebuild`. If it reports another checkout path or unknown Git history, run `rebuild` unless the user explicitly wants this DB to belong to the current checkout; only then use `update --adopt`.
 
 6. Check status when lock or freshness may matter:
 

@@ -60,6 +60,8 @@ func printMetaStatus(meta map[string]string) {
 		"schema_version",
 		"file_source",
 		"hash_algorithm",
+		"config_max_bytes",
+		"config_ignore_dirs",
 		"indexed_at",
 		"updated_at",
 		"last_operation",
@@ -99,7 +101,7 @@ func printCurrentStatus(root string, meta map[string]string) error {
 	if status.dirty != "" {
 		fmt.Printf("current_vcs_dirty\t%s\n", yesNo(status.dirty == boolText(true)))
 	}
-	compatibility, err := checkUpdateCompatibility(meta, root)
+	compatibility, err := checkUpdateCompatibility(meta, root, defaultBuildConfig())
 	if err != nil {
 		return err
 	}
