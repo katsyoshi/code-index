@@ -109,6 +109,12 @@ func TestHelpCommand(t *testing.T) {
 	}
 }
 
+func TestStatsCommandRejectsExtraArgs(t *testing.T) {
+	if err := run([]string{"stats", "extra"}); err == nil {
+		t.Fatal("stats with extra arg succeeded, want failure")
+	}
+}
+
 func TestIndexLockPreventsConcurrentBuilds(t *testing.T) {
 	db := filepath.Join(t.TempDir(), "index.sqlite")
 	lock, err := acquireIndexLock(db, "rebuild", "/repo")

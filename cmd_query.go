@@ -109,6 +109,9 @@ func cmdStats(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	if fs.NArg() != 0 {
+		return errors.New(commandUsage("stats"))
+	}
 	return runSQLitePrint(requiredDB(*db, *root), mustEmbeddedSQL("stats.sql"))
 }
 
