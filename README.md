@@ -65,13 +65,13 @@ Host-specific metadata can live under `skills/code-index/agents/`; agents that d
 
 ## Usage
 
-Build or refresh the index:
+Update an existing index incrementally:
 
 ```sh
 ./code-index update /path/to/repo
 ```
 
-`update` requires a Git work tree. It creates the database on first use, refreshes changed Git-tracked files, and removes files that are no longer tracked.
+`update` requires an existing index database and a Git work tree. It refreshes changed Git-tracked files and removes files that are no longer tracked. If the index does not exist yet, run `init` or `rebuild` first.
 
 Its change counts are file counts: `added_files`, `updated_files`, and `deleted_files`. `symbols` reports symbols indexed from added or updated files during that update; use `stats` or `metrics` for index-wide totals.
 
@@ -83,7 +83,7 @@ Rebuild an index atomically from Git-tracked files:
 
 `rebuild` requires a Git work tree and indexes files reported by `git ls-files`. If another `init`, `rebuild`, or `update` is already running for the same database, `rebuild` skips and exits successfully.
 
-Initialize an empty index database when explicitly needed:
+Initialize an empty index database:
 
 ```sh
 ./code-index init /path/to/repo

@@ -66,10 +66,16 @@ fi
 export CODE_INDEX_CACHE_DIR="${CODE_INDEX_CACHE_DIR:-/tmp/code-index}"
 ```
 
-5. Build or refresh the index before substantial search work. Prefer `update`; it creates the database on first use, refreshes changed Git-tracked files, and removes files no longer tracked by Git:
+5. Build or refresh the index before substantial search work. Prefer `update` for an existing index; it refreshes changed Git-tracked files and removes files no longer tracked by Git:
 
 ```bash
 "$TOOL" update "$PWD"
+```
+
+If `update` reports that the index does not exist yet, run `rebuild` explicitly:
+
+```bash
+"$TOOL" rebuild "$PWD"
 ```
 
 6. Check status when lock or freshness may matter:
@@ -132,7 +138,7 @@ Common commands:
 # Atomic full rebuild from Git-tracked files. Current CLI skips successfully if another operation holds the lock.
 "$TOOL" rebuild "$PWD"
 
-# Create or incrementally refresh the index from Git-tracked files.
+# Incrementally refresh an existing index from Git-tracked files.
 "$TOOL" update "$PWD"
 
 # Show lock state and metadata from the last successful update.

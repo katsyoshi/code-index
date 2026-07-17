@@ -55,42 +55,10 @@ func cmdInit(args []string) error {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	tmpDB, err := createTempDBPath(db)
-	if err != nil {
-		return err
-	}
-	installed := false
-	defer func() {
-		if !installed {
-			_ = removeDBFiles(tmpDB)
-		}
-	}()
 	fts := hasFTS5()
-	writer, wait, err := sqliteWriter(tmpDB)
-	if err != nil {
+	if err := createEmptyIndexDB(db, root, "init", fts); err != nil {
 		return err
 	}
-	writerOK := false
-	defer func() {
-		if !writerOK {
-			_ = writer.Close()
-			_ = wait()
-		}
-	}()
-	writeSchema(writer, fts)
-	writeOperationMetaSQL(writer, root, "init", fts)
-	writeSQL(writer, "commit;\n")
-	if err := writer.Close(); err != nil {
-		return err
-	}
-	if err := wait(); err != nil {
-		return err
-	}
-	writerOK = true
-	if err := installBuiltDB(tmpDB, db); err != nil {
-		return err
-	}
-	installed = true
 	fmt.Printf("db: %s\n", db)
 	fmt.Printf("root: %s\n", root)
 	fmt.Printf("files: 0\n")
@@ -256,6 +224,15 @@ func runUpdate(args []string) error {
 	if db == "" {
 		db = defaultDBPath(root)
 	}
+	if !fileExists(db) {
+		if _, locked, err := readActiveIndexLock(db); err != nil {
+			return err
+		} else if locked {
+			printLockSkipped(db)
+			return nil
+		}
+		return fmt.Errorf("index not found: %s; run init or rebuild first, or pass --db", db)
+	}
 	if err := os.MkdirAll(filepath.Dir(db), 0o755); err != nil {
 		return err
 	}
@@ -268,12 +245,6 @@ func runUpdate(args []string) error {
 		return err
 	}
 	defer lock.release()
-	if !fileExists(db) {
-		fts := hasFTS5()
-		if err := createEmptyIndexDB(db, root, "update", fts); err != nil {
-			return err
-		}
-	}
 	existing, err := loadIndexedFileStates(db)
 	if err != nil {
 		return err

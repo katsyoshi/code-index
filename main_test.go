@@ -283,7 +283,7 @@ func TestUpdateSkipsWhenLockedWithoutExistingDB(t *testing.T) {
 	}
 }
 
-func TestUpdateCommandCreatesSQLiteIndex(t *testing.T) {
+func TestUpdateCommandRequiresExistingIndex(t *testing.T) {
 	if _, err := exec.LookPath("sqlite3"); err != nil {
 		t.Skip("sqlite3 command not found")
 	}
@@ -300,21 +300,16 @@ func TestUpdateCommandCreatesSQLiteIndex(t *testing.T) {
 	initGitRepo(t, root, "main.go")
 	db := filepath.Join(t.TempDir(), "index.sqlite")
 
-	if err := run([]string{"update", "--db", db, root}); err != nil {
-		t.Fatal(err)
+	err := run([]string{"update", "--db", db, root})
+	if err == nil {
+		t.Fatal("update without existing index succeeded, want failure")
 	}
-	if _, err := os.Stat(db); err != nil {
-		t.Fatal(err)
+	if !strings.Contains(err.Error(), "run init or rebuild first") {
+		t.Fatalf("error = %q, want init or rebuild guidance", err)
 	}
-	if _, err := os.Stat(indexLockPath(db)); !os.IsNotExist(err) {
-		t.Fatalf("lock file still exists or returned unexpected error: %v", err)
+	if _, err := os.Stat(db); !os.IsNotExist(err) {
+		t.Fatalf("db exists after failed update or returned unexpected error: %v", err)
 	}
-	assertSQLiteValue(t, db, "select count(*) from symbols where name = 'main';", "1")
-	assertSQLiteValue(t, db, "select count(*) from symbols where name = 'untracked';", "0")
-	assertMetaValue(t, db, "schema_version", schemaVersion)
-	assertMetaValue(t, db, "file_source", fileSource)
-	assertMetaValue(t, db, "hash_algorithm", contentHashAlgorithm)
-	assertMetaValue(t, db, "last_operation", "update")
 }
 
 func TestUpdateOutputReportsChangedFileCounts(t *testing.T) {
@@ -331,7 +326,7 @@ func TestUpdateOutputReportsChangedFileCounts(t *testing.T) {
 	initGitRepo(t, root, "main.go")
 	db := filepath.Join(t.TempDir(), "index.sqlite")
 
-	if err := run([]string{"update", "--db", db, root}); err != nil {
+	if err := run([]string{"rebuild", "--db", db, root}); err != nil {
 		t.Fatal(err)
 	}
 	out := captureRunOutput(t, []string{"update", "--db", db, root})
@@ -561,10 +556,13 @@ func TestStatusTreatsIndexedDirtyWorkTreeAsFresh(t *testing.T) {
 	}
 	initGitRepo(t, root, "main.go")
 	runGit(t, root, "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "initial")
+	db := filepath.Join(t.TempDir(), "index.sqlite")
+	if err := run([]string{"init", "--db", db, root}); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(path, []byte("package main\n\nfunc dirtyName() {}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	db := filepath.Join(t.TempDir(), "index.sqlite")
 	if err := run([]string{"update", "--db", db, root}); err != nil {
 		t.Fatal(err)
 	}
