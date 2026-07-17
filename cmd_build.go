@@ -37,9 +37,7 @@ func cmdInit(args []string) error {
 	if db == "" {
 		db = defaultDBPath(root)
 	}
-	if _, err := os.Stat(db); err == nil {
-		return fmt.Errorf("index already exists: %s; run rebuild to replace it", db)
-	} else if !errors.Is(err, os.ErrNotExist) {
+	if err := ensureIndexDoesNotExist(db); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(db), 0o755); err != nil {
@@ -50,9 +48,7 @@ func cmdInit(args []string) error {
 		return err
 	}
 	defer lock.release()
-	if _, err := os.Stat(db); err == nil {
-		return fmt.Errorf("index already exists: %s; run rebuild to replace it", db)
-	} else if !errors.Is(err, os.ErrNotExist) {
+	if err := ensureIndexDoesNotExist(db); err != nil {
 		return err
 	}
 	fts := hasFTS5()
@@ -69,6 +65,15 @@ func cmdInit(args []string) error {
 	fmt.Printf("blank_lines: 0\n")
 	fmt.Printf("hash_algorithm: %s\n", contentHashAlgorithm)
 	fmt.Printf("fts5: %s\n", yesNo(fts))
+	return nil
+}
+
+func ensureIndexDoesNotExist(db string) error {
+	if _, err := os.Stat(db); err == nil {
+		return fmt.Errorf("index already exists: %s; run rebuild to replace it", db)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
 	return nil
 }
 
