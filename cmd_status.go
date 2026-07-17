@@ -99,6 +99,16 @@ func printCurrentStatus(root string, meta map[string]string) error {
 	if status.dirty != "" {
 		fmt.Printf("current_vcs_dirty\t%s\n", yesNo(status.dirty == boolText(true)))
 	}
+	compatibility, err := checkUpdateCompatibility(meta, root)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("update_compatible\t%s\n", yesNo(compatibility.compatible))
+	fmt.Printf("update_requires_adopt\t%s\n", yesNo(compatibility.requiresAdopt))
+	fmt.Printf("update_rebuild_required\t%s\n", yesNo(compatibility.rebuildRequired))
+	if compatibility.blocker != "" {
+		fmt.Printf("update_blocker\t%s\n", compatibility.blocker)
+	}
 	if status.revision == "" && status.dirty == "" {
 		return nil
 	}

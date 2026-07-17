@@ -105,6 +105,8 @@ Show index status:
 
 `status` reports database metadata, current lock state, current Git head/branch/dirty state, and `index_stale`. A dirty work tree is fresh when it matches the dirty snapshot recorded by the last successful index operation.
 
+It also reports whether `update` can safely proceed, whether `update --adopt` would be required, or whether `rebuild` is required.
+
 Show command help:
 
 ```sh

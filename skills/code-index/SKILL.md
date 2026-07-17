@@ -86,6 +86,8 @@ If `update` reports incompatible schema, file source, or hash settings, run `reb
 "$TOOL" status --root "$PWD"
 ```
 
+Use `update_compatible`, `update_requires_adopt`, `update_rebuild_required`, and `update_blocker` from `status` to decide whether to run normal `update`, ask before `update --adopt`, or run `rebuild`.
+
 If `status` is unsupported, continue with query commands and rely on rebuild output.
 
 7. Search definitions and files through the index:

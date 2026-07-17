@@ -355,6 +355,51 @@ func TestStatusReportsLock(t *testing.T) {
 	}
 }
 
+func TestStatusReportsUpdateCompatibility(t *testing.T) {
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		t.Skip("sqlite3 command not found")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git command not found")
+	}
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	initGitRepo(t, root, "main.go")
+	runGit(t, root, "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "initial")
+	db := filepath.Join(t.TempDir(), "index.sqlite")
+	if err := run([]string{"rebuild", "--db", db, root}); err != nil {
+		t.Fatal(err)
+	}
+
+	out := captureRunOutput(t, []string{"status", "--db", db, "--root", root})
+	for _, want := range []string{
+		"update_compatible\tyes",
+		"update_requires_adopt\tno",
+		"update_rebuild_required\tno",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("status output = %q, want %s", out, want)
+		}
+	}
+	otherRoot := filepath.Join(t.TempDir(), "checkout")
+	if err := os.Symlink(root, otherRoot); err != nil {
+		t.Fatal(err)
+	}
+	out = captureRunOutput(t, []string{"status", "--db", db, "--root", otherRoot})
+	for _, want := range []string{
+		"update_compatible\tno",
+		"update_requires_adopt\tyes",
+		"update_rebuild_required\tno",
+		"update_blocker\tdifferent_checkout",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("status output = %q, want %s", out, want)
+		}
+	}
+}
+
 func TestInitCommandCreatesEmptySQLiteIndexAndFailsIfExists(t *testing.T) {
 	if _, err := exec.LookPath("sqlite3"); err != nil {
 		t.Skip("sqlite3 command not found")

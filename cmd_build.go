@@ -344,33 +344,68 @@ func runUpdate(args []string) error {
 }
 
 func validateUpdateCompatibility(meta map[string]string, root string, adopt bool) error {
+	compatibility, err := checkUpdateCompatibility(meta, root)
+	if err != nil {
+		return err
+	}
+	if compatibility.compatible || (adopt && compatibility.requiresAdopt) {
+		return nil
+	}
+	switch compatibility.blocker {
+	case "schema_version":
+		return fmt.Errorf("index schema is incompatible: db schema_version=%s, tool schema_version=%s; run rebuild", meta["schema_version"], schemaVersion)
+	case "file_source":
+		return fmt.Errorf("index file source is incompatible: db file_source=%s, tool file_source=%s; run rebuild", meta["file_source"], fileSource)
+	case "hash_algorithm":
+		return fmt.Errorf("index hash algorithm is incompatible: db hash_algorithm=%s, tool hash_algorithm=%s; run rebuild", meta["hash_algorithm"], contentHashAlgorithm)
+	case "different_checkout":
+		return fmt.Errorf("index belongs to a different checkout: indexed_root=%s current_root=%s; run rebuild, or run update --adopt if this DB should belong to the current checkout", meta["root"], root)
+	case "unknown_git_history":
+		indexedHead := meta["vcs_head"]
+		if indexedHead == "" {
+			indexedHead = meta["vcs_revision"]
+		}
+		return fmt.Errorf("index belongs to an unknown Git history: indexed_head=%s; run rebuild, or run update --adopt if this DB should belong to the current checkout", indexedHead)
+	default:
+		return fmt.Errorf("index is incompatible with update: %s; run rebuild", compatibility.blocker)
+	}
+}
+
+type updateCompatibility struct {
+	compatible      bool
+	requiresAdopt   bool
+	rebuildRequired bool
+	blocker         string
+}
+
+func checkUpdateCompatibility(meta map[string]string, root string) (updateCompatibility, error) {
 	if got := meta["schema_version"]; got != "" && got != schemaVersion {
-		return fmt.Errorf("index schema is incompatible: db schema_version=%s, tool schema_version=%s; run rebuild", got, schemaVersion)
+		return updateCompatibility{rebuildRequired: true, blocker: "schema_version"}, nil
 	}
 	if got := meta["file_source"]; got != "" && got != fileSource {
-		return fmt.Errorf("index file source is incompatible: db file_source=%s, tool file_source=%s; run rebuild", got, fileSource)
+		return updateCompatibility{rebuildRequired: true, blocker: "file_source"}, nil
 	}
 	if got := meta["hash_algorithm"]; got != "" && got != contentHashAlgorithm {
-		return fmt.Errorf("index hash algorithm is incompatible: db hash_algorithm=%s, tool hash_algorithm=%s; run rebuild", got, contentHashAlgorithm)
+		return updateCompatibility{rebuildRequired: true, blocker: "hash_algorithm"}, nil
 	}
 	indexedRoot := meta["root"]
-	if indexedRoot != "" && indexedRoot != root && !adopt {
-		return fmt.Errorf("index belongs to a different checkout: indexed_root=%s current_root=%s; run rebuild, or run update --adopt if this DB should belong to the current checkout", indexedRoot, root)
+	if indexedRoot != "" && indexedRoot != root {
+		return updateCompatibility{requiresAdopt: true, blocker: "different_checkout"}, nil
 	}
 	indexedHead := meta["vcs_head"]
 	if indexedHead == "" {
 		indexedHead = meta["vcs_revision"]
 	}
-	if indexedHead != "" && !adopt {
+	if indexedHead != "" {
 		exists, err := gitCommitExists(root, indexedHead)
 		if err != nil {
-			return err
+			return updateCompatibility{}, err
 		}
 		if !exists {
-			return fmt.Errorf("index belongs to an unknown Git history: indexed_head=%s; run rebuild, or run update --adopt if this DB should belong to the current checkout", indexedHead)
+			return updateCompatibility{requiresAdopt: true, blocker: "unknown_git_history"}, nil
 		}
 	}
-	return nil
+	return updateCompatibility{compatible: true}, nil
 }
 
 func createEmptyIndexDB(db, root, operation string, fts bool) error {
