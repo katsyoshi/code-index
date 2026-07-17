@@ -267,7 +267,11 @@ func runUpdate(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := validateUpdateCompatibility(meta, root, options.config(), options.adopt); err != nil {
+	fts, err := dbHasFTS5Tables(db)
+	if err != nil {
+		return err
+	}
+	if err := validateUpdateCompatibility(meta, root, options.config(), fts, options.adopt); err != nil {
 		return err
 	}
 	existing, err := loadIndexedFileStates(db)
@@ -275,10 +279,6 @@ func runUpdate(args []string) error {
 		return err
 	}
 	candidates, candidateOnly := updateCandidatePaths(root, existing, meta)
-	fts, err := dbHasFTS5Tables(db)
-	if err != nil {
-		return err
-	}
 	writer, wait, err := sqliteWriter(db)
 	if err != nil {
 		return err
@@ -350,8 +350,8 @@ func runUpdate(args []string) error {
 	return nil
 }
 
-func validateUpdateCompatibility(meta map[string]string, root string, config buildConfig, adopt bool) error {
-	compatibility, err := checkUpdateCompatibility(meta, root, config)
+func validateUpdateCompatibility(meta map[string]string, root string, config buildConfig, fts bool, adopt bool) error {
+	compatibility, err := checkUpdateCompatibility(meta, root, config, fts)
 	if err != nil {
 		return err
 	}
@@ -365,6 +365,8 @@ func validateUpdateCompatibility(meta map[string]string, root string, config bui
 		return fmt.Errorf("index file source is incompatible: db file_source=%s, tool file_source=%s; run rebuild", meta["file_source"], fileSource)
 	case "hash_algorithm":
 		return fmt.Errorf("index hash algorithm is incompatible: db hash_algorithm=%s, tool hash_algorithm=%s; run rebuild", meta["hash_algorithm"], contentHashAlgorithm)
+	case "fts5":
+		return fmt.Errorf("index FTS5 setting is incompatible: db fts5=%s, current fts5=%s; run rebuild", meta["fts5"], boolText(fts))
 	case "config_max_bytes":
 		return fmt.Errorf("index max bytes setting is incompatible: db config_max_bytes=%s, requested config_max_bytes=%s; run rebuild", meta["config_max_bytes"], int64Text(config.maxBytes))
 	case "config_ignore_dirs":
@@ -389,7 +391,7 @@ type updateCompatibility struct {
 	blocker         string
 }
 
-func checkUpdateCompatibility(meta map[string]string, root string, config buildConfig) (updateCompatibility, error) {
+func checkUpdateCompatibility(meta map[string]string, root string, config buildConfig, fts bool) (updateCompatibility, error) {
 	if got := meta["schema_version"]; got != "" && got != schemaVersion {
 		return updateCompatibility{rebuildRequired: true, blocker: "schema_version"}, nil
 	}
@@ -398,6 +400,9 @@ func checkUpdateCompatibility(meta map[string]string, root string, config buildC
 	}
 	if got := meta["hash_algorithm"]; got != "" && got != contentHashAlgorithm {
 		return updateCompatibility{rebuildRequired: true, blocker: "hash_algorithm"}, nil
+	}
+	if got := meta["fts5"]; got != "" && got != boolText(fts) {
+		return updateCompatibility{rebuildRequired: true, blocker: "fts5"}, nil
 	}
 	if got := meta["config_max_bytes"]; got != "" && got != int64Text(config.maxBytes) {
 		return updateCompatibility{rebuildRequired: true, blocker: "config_max_bytes"}, nil

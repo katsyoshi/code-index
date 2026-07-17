@@ -101,7 +101,7 @@ func printCurrentStatus(root string, meta map[string]string) error {
 	if status.dirty != "" {
 		fmt.Printf("current_vcs_dirty\t%s\n", yesNo(status.dirty == boolText(true)))
 	}
-	compatibility, err := checkUpdateCompatibility(meta, root, defaultBuildConfig())
+	compatibility, err := checkUpdateCompatibility(meta, root, defaultBuildConfig(), hasFTS5())
 	if err != nil {
 		return err
 	}
