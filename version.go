@@ -1,12 +1,22 @@
 package main
 
-import "runtime/debug"
+import (
+	"runtime/debug"
+	"strconv"
+)
 
 var buildCommit = "unknown"
 
 type buildInfo struct {
 	commit   string
 	modified string
+}
+
+type versionJSONResult struct {
+	Commit        *string `json:"commit"`
+	Modified      *bool   `json:"modified"`
+	SchemaVersion int64   `json:"schema_version"`
+	FileSource    string  `json:"file_source"`
 }
 
 func currentBuildInfo() buildInfo {
@@ -26,4 +36,19 @@ func currentBuildInfo() buildInfo {
 		}
 	}
 	return info
+}
+
+func versionCommitPointer(value string) *string {
+	if value == "" || value == "unknown" {
+		return nil
+	}
+	return &value
+}
+
+func versionModifiedPointer(value string) *bool {
+	modified, err := strconv.ParseBool(value)
+	if err != nil {
+		return nil
+	}
+	return &modified
 }

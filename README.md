@@ -42,6 +42,14 @@ export CODE_INDEX_BIN="$SKILL_DIR/exec/code-index"
 
 `version` prints the build commit hash when available, plus schema metadata useful for compatibility checks.
 
+For agents and scripts, use JSON output:
+
+```sh
+"$CODE_INDEX_BIN" version --format json
+```
+
+The JSON format emits one object. `modified` is a boolean and `schema_version` is a number; unavailable build information is `null`.
+
 For local development in this repository, build the checked-out source and point `CODE_INDEX_BIN` at that binary:
 
 ```sh

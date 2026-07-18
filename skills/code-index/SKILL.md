@@ -57,7 +57,7 @@ fi
 3. Check the tool build information. Prefer a build commit hash over semver for identifying the binary, but do not infer ordering from the hash without commit history. Treat the hash as compatible only when it is in a known compatible list, or use explicit feature checks when the binary supports them. If the command is unsupported or the build is incompatible for the workflow you need, ask the user to install or configure a compatible `code-index` binary:
 
 ```bash
-"$TOOL" version
+"$TOOL" version --format json
 ```
 
 4. In sandboxed agent sessions, prefer a writable cache directory unless the user gave a DB path:
@@ -134,7 +134,7 @@ Common commands:
 "$TOOL" path "$PWD"
 
 # Show build information for compatibility checks.
-"$TOOL" version
+"$TOOL" version --format json
 
 # Initialize an empty schema when explicitly needed.
 "$TOOL" init "$PWD"

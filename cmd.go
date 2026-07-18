@@ -2,10 +2,12 @@ package main
 
 import (
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -17,7 +19,7 @@ type command struct {
 
 var commands = []command{
 	{name: "help", usage: "code-index help [COMMAND]", summary: "show command help"},
-	{name: "version", usage: "code-index version", summary: "show build and schema information"},
+	{name: "version", usage: "code-index version [--format text|json]", summary: "show build and schema information"},
 	{name: "path", usage: "code-index path ROOT", summary: "print the default database path for a root"},
 	{name: "init", usage: "code-index init [--db DB] ROOT", summary: "initialize an empty index database"},
 	{name: "rebuild", usage: "code-index rebuild [--db DB] [--max-bytes N] ROOT", summary: "atomically rebuild the full index"},
@@ -125,10 +127,32 @@ func cmdHelp(args []string) error {
 }
 
 func cmdVersion(args []string) error {
-	if len(args) != 0 {
+	fs := flag.NewFlagSet("version", flag.ExitOnError)
+	formatFlag := fs.String("format", "text", "output format: text or json")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
 		return errors.New(commandUsage("version"))
 	}
+	format, err := parseOutputFormat(*formatFlag)
+	if err != nil {
+		return err
+	}
 	info := currentBuildInfo()
+	if format == outputFormatJSON {
+		schema, err := strconv.ParseInt(schemaVersion, 10, 64)
+		if err != nil {
+			return fmt.Errorf("invalid schema version %q: %w", schemaVersion, err)
+		}
+		result := versionJSONResult{
+			Commit:        versionCommitPointer(info.commit),
+			Modified:      versionModifiedPointer(info.modified),
+			SchemaVersion: schema,
+			FileSource:    fileSource,
+		}
+		return writeJSON(os.Stdout, result)
+	}
 	fmt.Println("key\tvalue")
 	fmt.Printf("commit\t%s\n", info.commit)
 	if info.modified != "" {

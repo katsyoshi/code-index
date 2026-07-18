@@ -91,6 +91,17 @@ func TestVersionCommand(t *testing.T) {
 	if err := run([]string{"version"}); err != nil {
 		t.Fatal(err)
 	}
+	var result versionJSONResult
+	decodeRunJSON(t, []string{"version", "--format", "json"}, &result)
+	if result.SchemaVersion != 1 || result.FileSource != fileSource {
+		t.Fatalf("version JSON = %#v", result)
+	}
+	if result.Commit != nil && *result.Commit == "unknown" {
+		t.Fatalf("version JSON commit = %q, want null for unknown", *result.Commit)
+	}
+	if err := run([]string{"version", "--format", "yaml"}); err == nil || !strings.Contains(err.Error(), "unsupported output format") {
+		t.Fatalf("version with unsupported format error = %v", err)
+	}
 	if err := run([]string{"version", "extra"}); err == nil {
 		t.Fatal("version with extra arg succeeded, want failure")
 	}
