@@ -22,13 +22,13 @@ var commands = []command{
 	{name: "init", usage: "code-index init [--db DB] ROOT", summary: "initialize an empty index database"},
 	{name: "rebuild", usage: "code-index rebuild [--db DB] [--max-bytes N] ROOT", summary: "atomically rebuild the full index"},
 	{name: "update", usage: "code-index update [--db DB] [--max-bytes N] [--adopt] ROOT", summary: "create or incrementally refresh the index"},
-	{name: "defs", usage: "code-index defs [--root ROOT|--db DB] [--kind KIND] [--language LANG] QUERY", summary: "find symbol definitions"},
-	{name: "files", usage: "code-index files [--root ROOT|--db DB] [--language LANG] QUERY", summary: "find indexed files"},
+	{name: "defs", usage: "code-index defs [--root ROOT|--db DB] [--kind KIND] [--language LANG] [--format text|json] QUERY", summary: "find symbol definitions"},
+	{name: "files", usage: "code-index files [--root ROOT|--db DB] [--language LANG] [--format text|json] QUERY", summary: "find indexed files"},
 	{name: "sql", usage: "code-index sql [--root ROOT|--db DB] [SQL]", summary: "run read-only SQL"},
-	{name: "show", usage: "code-index show [--root ROOT|--db DB] --line N [--context N] PATH", summary: "show indexed source around a line"},
+	{name: "show", usage: "code-index show [--root ROOT|--db DB] --line N [--context N] [--format text|json] PATH", summary: "show indexed source around a line"},
 	{name: "schema", usage: "code-index schema [--root ROOT|--db DB] [--format text|json]", summary: "show index tables and columns"},
 	{name: "stats", usage: "code-index stats [--root ROOT|--db DB]", summary: "show index table counts"},
-	{name: "metrics", usage: "code-index metrics [--root ROOT|--db DB] [--language LANG] [--limit N] [PATH_QUERY]", summary: "show indexed code metrics"},
+	{name: "metrics", usage: "code-index metrics [--root ROOT|--db DB] [--language LANG] [--limit N] [--format text|json] [PATH_QUERY]", summary: "show indexed code metrics"},
 	{name: "status", usage: "code-index status [--root ROOT|--db DB] [--format text|json]", summary: "show index metadata, lock state, and freshness"},
 }
 

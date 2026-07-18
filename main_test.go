@@ -180,6 +180,71 @@ func TestSchemaCommandShowsUserTablesAndColumns(t *testing.T) {
 	}
 }
 
+func TestQueryCommandsJSONOutput(t *testing.T) {
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		t.Skip("sqlite3 command not found")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git command not found")
+	}
+	root := t.TempDir()
+	content := "package main\n\nfunc main() {\n\tprintln(\"hello\")\n}\n"
+	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	initGitRepo(t, root, "main.go")
+	db := filepath.Join(t.TempDir(), "index.sqlite")
+	if err := run([]string{"rebuild", "--db", db, root}); err != nil {
+		t.Fatal(err)
+	}
+
+	var definitions []defsJSONRow
+	decodeRunJSON(t, []string{"defs", "--db", db, "--format", "json", "main"}, &definitions)
+	if len(definitions) != 1 || definitions[0].Path != "main.go" || definitions[0].Line != 3 || definitions[0].Name != "main" || definitions[0].Language == nil || *definitions[0].Language != "go" {
+		t.Fatalf("defs JSON = %#v", definitions)
+	}
+
+	var files []filesJSONRow
+	decodeRunJSON(t, []string{"files", "--db", db, "--format", "json", "main"}, &files)
+	if len(files) != 1 || files[0].Path != "main.go" || files[0].Size != int64(len(content)) || files[0].Language == nil || *files[0].Language != "go" {
+		t.Fatalf("files JSON = %#v", files)
+	}
+	var noFiles []filesJSONRow
+	decodeRunJSON(t, []string{"files", "--db", db, "--format", "json", "missing"}, &noFiles)
+	if noFiles == nil || len(noFiles) != 0 {
+		t.Fatalf("empty files JSON = %#v, want []", noFiles)
+	}
+
+	var shown []showJSONRow
+	decodeRunJSON(t, []string{"show", "--db", db, "--line", "4", "--context", "0", "--format", "json", "main.go"}, &shown)
+	if len(shown) != 1 || shown[0].Path != "main.go" || shown[0].Line != 4 || shown[0].Text != "\tprintln(\"hello\")" {
+		t.Fatalf("show JSON = %#v", shown)
+	}
+
+	var summary []metricsSummaryJSONRow
+	decodeRunJSON(t, []string{"metrics", "--db", db, "--format", "json"}, &summary)
+	if len(summary) != 1 || summary[0].Language != "go" || summary[0].Files != 1 || summary[0].Lines != 5 || summary[0].Symbols != 1 {
+		t.Fatalf("metrics summary JSON = %#v", summary)
+	}
+	var fileMetrics []metricsFileJSONRow
+	decodeRunJSON(t, []string{"metrics", "--db", db, "--format", "json", "main"}, &fileMetrics)
+	if len(fileMetrics) != 1 || fileMetrics[0].Path != "main.go" || fileMetrics[0].Lines != 5 || fileMetrics[0].Symbols != 1 {
+		t.Fatalf("metrics files JSON = %#v", fileMetrics)
+	}
+
+	invalidFormatArgs := [][]string{
+		{"defs", "--db", db, "--format", "yaml", "main"},
+		{"files", "--db", db, "--format", "yaml", "main"},
+		{"show", "--db", db, "--line", "1", "--format", "yaml", "main.go"},
+		{"metrics", "--db", db, "--format", "yaml"},
+	}
+	for _, args := range invalidFormatArgs {
+		if err := run(args); err == nil || !strings.Contains(err.Error(), "unsupported output format") {
+			t.Fatalf("%s with unsupported format error = %v", args[0], err)
+		}
+	}
+}
+
 func TestIndexLockPreventsConcurrentBuilds(t *testing.T) {
 	db := filepath.Join(t.TempDir(), "index.sqlite")
 	lock, err := acquireIndexLock(db, "rebuild", "/repo")
@@ -1029,6 +1094,14 @@ func runGitOutput(t *testing.T, root string, args ...string) string {
 		t.Fatalf("git %s failed: %v: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}
 	return strings.TrimSpace(string(out))
+}
+
+func decodeRunJSON(t *testing.T, args []string, destination any) {
+	t.Helper()
+	out := captureRunOutput(t, args)
+	if err := json.Unmarshal([]byte(out), destination); err != nil {
+		t.Fatalf("%s JSON = %q: %v", args[0], out, err)
+	}
 }
 
 func captureRunOutput(t *testing.T, args []string) string {

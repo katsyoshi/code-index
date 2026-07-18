@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -125,6 +127,30 @@ func sqliteQueryOutput(db, sql string) (string, error) {
 		return "", fmt.Errorf("sqlite3 query failed: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return string(out), nil
+}
+
+func sqliteJSONQuery(db, sql string, destination any) error {
+	notice, err := queryLockNotice(db)
+	if err != nil {
+		return err
+	}
+	if notice != "" {
+		fmt.Fprint(os.Stderr, notice)
+	}
+	cmd := exec.Command("sqlite3", "-batch", "-json", db, sql)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("sqlite3 JSON query failed: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	if len(bytes.TrimSpace(out)) == 0 {
+		out = []byte("[]")
+	}
+	if err := json.Unmarshal(out, destination); err != nil {
+		return fmt.Errorf("invalid JSON from sqlite3: %w", err)
+	}
+	return nil
 }
 
 type metaPair struct {

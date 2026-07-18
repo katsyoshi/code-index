@@ -93,8 +93,8 @@ If `status` is unsupported, continue with query commands and rely on rebuild out
 7. Search definitions and files through the index:
 
 ```bash
-"$TOOL" defs --root "$PWD" parse_config
-"$TOOL" files --root "$PWD" config
+"$TOOL" defs --root "$PWD" --format json parse_config
+"$TOOL" files --root "$PWD" --format json config
 ```
 
 8. Run raw read-only SQL for precise lookup:
@@ -107,7 +107,7 @@ If `status` is unsupported, continue with query commands and rely on rebuild out
 9. Show source around indexed lines:
 
 ```bash
-"$TOOL" show --root "$PWD" --line 42 lib/config.rb
+"$TOOL" show --root "$PWD" --line 42 --format json lib/config.rb
 ```
 
 10. Run `update` after editing tracked files that affect search results. Use `rebuild` after tool upgrades, schema changes, or option changes that should refresh every tracked file.
@@ -152,16 +152,16 @@ Common commands:
 "$TOOL" status --root "$PWD" --format json
 
 # Find symbols.
-"$TOOL" defs --root "$PWD" UserRepository
+"$TOOL" defs --root "$PWD" --format json UserRepository
 
 # Find files by path.
-"$TOOL" files --root "$PWD" repository
+"$TOOL" files --root "$PWD" --format json repository
 
 # Inspect the available tables and columns in the agent-oriented format.
 "$TOOL" schema --root "$PWD" --format json
 
 # Show source from indexed lines.
-"$TOOL" show --root "$PWD" --line 42 lib/user_repository.rb
+"$TOOL" show --root "$PWD" --line 42 --format json lib/user_repository.rb
 ```
 
 The default database lives under `CODE_INDEX_CACHE_DIR` when set. Otherwise it uses `$XDG_CACHE_HOME/code-index` or `~/.cache/code-index`, keyed by the repository root path. Pass `--db path/to/index.sqlite` when a stable or shared index is needed.

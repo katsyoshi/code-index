@@ -121,12 +121,14 @@ Find symbol definitions:
 
 ```sh
 ./code-index defs --root /path/to/repo parse_config
+./code-index defs --root /path/to/repo --format json parse_config
 ```
 
 Find files:
 
 ```sh
 ./code-index files --root /path/to/repo config
+./code-index files --root /path/to/repo --format json config
 ```
 
 Run read-only SQL:
@@ -140,6 +142,7 @@ Show indexed source around a line:
 
 ```sh
 ./code-index show --root /path/to/repo --line 42 lib/config.rb
+./code-index show --root /path/to/repo --line 42 --format json lib/config.rb
 ```
 
 Show the current index tables and columns:
@@ -157,7 +160,10 @@ Show indexed code metrics:
 ```sh
 ./code-index metrics --root /path/to/repo
 ./code-index metrics --root /path/to/repo lib/config
+./code-index metrics --root /path/to/repo --format json
 ```
+
+For `defs`, `files`, `show`, and `metrics`, the JSON format emits an array of objects, uses native JSON numbers, preserves nullable fields as `null`, and emits `[]` when there are no rows.
 
 The default database is stored under `CODE_INDEX_CACHE_DIR` when set. Otherwise it uses `$XDG_CACHE_HOME/code-index` or `~/.cache/code-index`, keyed by the absolute repository path. Use `--db` to provide an explicit database path.
 

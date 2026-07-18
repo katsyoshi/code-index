@@ -20,6 +20,47 @@ type schemaJSONRow struct {
 	Key        *string `json:"key"`
 }
 
+type defsJSONRow struct {
+	Path      string  `json:"path"`
+	Line      int     `json:"line"`
+	Kind      string  `json:"kind"`
+	Name      string  `json:"name"`
+	Language  *string `json:"language"`
+	Signature string  `json:"signature"`
+}
+
+type filesJSONRow struct {
+	Path     string  `json:"path"`
+	Language *string `json:"language"`
+	Size     int64   `json:"size"`
+}
+
+type showJSONRow struct {
+	Path string `json:"path"`
+	Line int    `json:"line"`
+	Text string `json:"text"`
+}
+
+type metricsSummaryJSONRow struct {
+	Language string `json:"language"`
+	Files    int    `json:"files"`
+	Lines    int    `json:"lines"`
+	Code     int    `json:"code"`
+	Comments int    `json:"comments"`
+	Blank    int    `json:"blank"`
+	Symbols  int    `json:"symbols"`
+}
+
+type metricsFileJSONRow struct {
+	Path     string  `json:"path"`
+	Language *string `json:"language"`
+	Lines    int     `json:"lines"`
+	Code     int     `json:"code"`
+	Comments int     `json:"comments"`
+	Blank    int     `json:"blank"`
+	Symbols  int     `json:"symbols"`
+}
+
 func cmdDefs(args []string) error {
 	fs := flag.NewFlagSet("defs", flag.ExitOnError)
 	root := fs.String("root", "", "repository root for default database path")
@@ -27,11 +68,16 @@ func cmdDefs(args []string) error {
 	kind := fs.String("kind", "", "symbol kind filter")
 	language := fs.String("language", "", "language filter")
 	limit := fs.Int("limit", 50, "maximum rows")
+	formatFlag := fs.String("format", "text", "output format: text or json")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {
 		return errors.New(commandUsage("defs"))
+	}
+	format, err := parseOutputFormat(*formatFlag)
+	if err != nil {
+		return err
 	}
 	query := fs.Arg(0)
 	where := "(name = " + quote(query) + " collate nocase or name like " + quote(query+"%") + " collate nocase or signature like " + quote("%"+query+"%") + " collate nocase or path like " + quote("%"+query+"%") + " collate nocase)"
@@ -42,7 +88,15 @@ func cmdDefs(args []string) error {
 		where += " and language = " + quote(*language)
 	}
 	sql := formatEmbeddedSQL("defs.sql", where, quote(query), quote(query+"%"), *limit)
-	return runSQLitePrint(requiredDB(*db, *root), sql)
+	dbPath := requiredDB(*db, *root)
+	if format == outputFormatText {
+		return runSQLitePrint(dbPath, sql)
+	}
+	rows := make([]defsJSONRow, 0)
+	if err := sqliteJSONQuery(dbPath, sql, &rows); err != nil {
+		return err
+	}
+	return writeJSON(os.Stdout, rows)
 }
 
 func cmdFiles(args []string) error {
@@ -51,11 +105,16 @@ func cmdFiles(args []string) error {
 	db := fs.String("db", "", "database path")
 	language := fs.String("language", "", "language filter")
 	limit := fs.Int("limit", 100, "maximum rows")
+	formatFlag := fs.String("format", "text", "output format: text or json")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {
 		return errors.New(commandUsage("files"))
+	}
+	format, err := parseOutputFormat(*formatFlag)
+	if err != nil {
+		return err
 	}
 	query := fs.Arg(0)
 	where := "path like " + quote("%"+query+"%") + " collate nocase"
@@ -63,7 +122,15 @@ func cmdFiles(args []string) error {
 		where += " and language = " + quote(*language)
 	}
 	sql := formatEmbeddedSQL("files.sql", where, *limit)
-	return runSQLitePrint(requiredDB(*db, *root), sql)
+	dbPath := requiredDB(*db, *root)
+	if format == outputFormatText {
+		return runSQLitePrint(dbPath, sql)
+	}
+	rows := make([]filesJSONRow, 0)
+	if err := sqliteJSONQuery(dbPath, sql, &rows); err != nil {
+		return err
+	}
+	return writeJSON(os.Stdout, rows)
 }
 
 func cmdSQL(args []string) error {
@@ -97,11 +164,16 @@ func cmdShow(args []string) error {
 	db := fs.String("db", "", "database path")
 	line := fs.Int("line", 0, "1-based line number")
 	context := fs.Int("context", 3, "context lines")
+	formatFlag := fs.String("format", "text", "output format: text or json")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 || *line <= 0 {
 		return errors.New(commandUsage("show"))
+	}
+	format, err := parseOutputFormat(*formatFlag)
+	if err != nil {
+		return err
 	}
 	path := strings.TrimPrefix(filepath.ToSlash(fs.Arg(0)), "/")
 	start := *line - *context
@@ -110,7 +182,15 @@ func cmdShow(args []string) error {
 	}
 	end := *line + *context
 	sql := formatEmbeddedSQL("show.sql", quote(path), quote("%"+path), quote(path), start, end)
-	return runSQLitePrint(requiredDB(*db, *root), sql)
+	dbPath := requiredDB(*db, *root)
+	if format == outputFormatText {
+		return runSQLitePrint(dbPath, sql)
+	}
+	rows := make([]showJSONRow, 0)
+	if err := sqliteJSONQuery(dbPath, sql, &rows); err != nil {
+		return err
+	}
+	return writeJSON(os.Stdout, rows)
 }
 
 func cmdStats(args []string) error {
@@ -196,23 +276,43 @@ func cmdMetrics(args []string) error {
 	db := fs.String("db", "", "database path")
 	language := fs.String("language", "", "language filter")
 	limit := fs.Int("limit", 100, "maximum rows")
+	formatFlag := fs.String("format", "text", "output format: text or json")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() > 1 {
 		return errors.New(commandUsage("metrics"))
 	}
+	format, err := parseOutputFormat(*formatFlag)
+	if err != nil {
+		return err
+	}
 	where := "1 = 1"
 	if *language != "" {
 		where += " and language = " + quote(*language)
 	}
 	var sql string
+	dbPath := requiredDB(*db, *root)
 	if fs.NArg() == 0 {
 		sql = formatEmbeddedSQL("metrics_summary.sql", where, *limit)
+		if format == outputFormatJSON {
+			rows := make([]metricsSummaryJSONRow, 0)
+			if err := sqliteJSONQuery(dbPath, sql, &rows); err != nil {
+				return err
+			}
+			return writeJSON(os.Stdout, rows)
+		}
 	} else {
 		query := fs.Arg(0)
 		where += " and path like " + quote("%"+query+"%") + " collate nocase"
 		sql = formatEmbeddedSQL("metrics_files.sql", where, *limit)
+		if format == outputFormatJSON {
+			rows := make([]metricsFileJSONRow, 0)
+			if err := sqliteJSONQuery(dbPath, sql, &rows); err != nil {
+				return err
+			}
+			return writeJSON(os.Stdout, rows)
+		}
 	}
-	return runSQLitePrint(requiredDB(*db, *root), sql)
+	return runSQLitePrint(dbPath, sql)
 }
