@@ -29,7 +29,7 @@ var commands = []command{
 	{name: "schema", usage: "code-index schema [--root ROOT|--db DB]", summary: "show index tables and columns"},
 	{name: "stats", usage: "code-index stats [--root ROOT|--db DB]", summary: "show index table counts"},
 	{name: "metrics", usage: "code-index metrics [--root ROOT|--db DB] [--language LANG] [--limit N] [PATH_QUERY]", summary: "show indexed code metrics"},
-	{name: "status", usage: "code-index status [--root ROOT|--db DB]", summary: "show index metadata, lock state, and freshness"},
+	{name: "status", usage: "code-index status [--root ROOT|--db DB] [--format text|json]", summary: "show index metadata, lock state, and freshness"},
 }
 
 func run(args []string) error {

@@ -83,7 +83,7 @@ If `update` reports incompatible schema, file source, hash, or indexing config s
 6. Check status when lock or freshness may matter:
 
 ```bash
-"$TOOL" status --root "$PWD"
+"$TOOL" status --root "$PWD" --format json
 ```
 
 Use `update_compatible`, `update_requires_adopt`, `update_rebuild_required`, and `update_blocker` from `status` to decide whether to run normal `update`, ask before `update --adopt`, or run `rebuild`.
@@ -148,8 +148,8 @@ Common commands:
 # Adopt an index from another checkout path or Git history only when intentional.
 "$TOOL" update --adopt "$PWD"
 
-# Show lock state and metadata from the last successful update.
-"$TOOL" status --root "$PWD"
+# Show lock state and metadata from the last successful update in the agent-oriented format.
+"$TOOL" status --root "$PWD" --format json
 
 # Find symbols.
 "$TOOL" defs --root "$PWD" UserRepository

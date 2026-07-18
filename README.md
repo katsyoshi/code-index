@@ -101,9 +101,12 @@ Show index status:
 
 ```sh
 ./code-index status --root /path/to/repo
+./code-index status --root /path/to/repo --format json
 ```
 
 `status` reports database metadata, current lock state, current Git head/branch/dirty state, and `index_stale`. A dirty work tree is fresh when it matches the dirty snapshot recorded by the last successful index operation.
+
+The JSON format is intended for agents and scripts. It emits one object, uses native JSON booleans and numbers, and represents unavailable values as `null`.
 
 It also reports whether `update` can safely proceed, whether `update --adopt` would be required, or whether `rebuild` is required.
 
