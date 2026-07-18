@@ -131,7 +131,7 @@ Common commands:
 "$TOOL" help update
 
 # Print the default database path for a root.
-"$TOOL" path "$PWD"
+"$TOOL" path --format json "$PWD"
 
 # Show build information for compatibility checks.
 "$TOOL" version --format json

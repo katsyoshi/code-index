@@ -107,6 +107,28 @@ func TestVersionCommand(t *testing.T) {
 	}
 }
 
+func TestPathCommandJSONOutput(t *testing.T) {
+	root := t.TempDir()
+	want := defaultDBPath(root)
+	out := strings.TrimSpace(captureRunOutput(t, []string{"path", root}))
+	if out != want {
+		t.Fatalf("path text = %q, want %q", out, want)
+	}
+	var result struct {
+		Path string `json:"path"`
+	}
+	decodeRunJSON(t, []string{"path", "--format", "json", root}, &result)
+	if result.Path != want {
+		t.Fatalf("path JSON = %#v, want %q", result, want)
+	}
+	if err := run([]string{"path", "--format", "yaml", root}); err == nil || !strings.Contains(err.Error(), "unsupported output format") {
+		t.Fatalf("path with unsupported format error = %v", err)
+	}
+	if err := run([]string{"path"}); err == nil {
+		t.Fatal("path without root succeeded, want failure")
+	}
+}
+
 func TestHelpCommand(t *testing.T) {
 	out := captureRunOutput(t, []string{"help"})
 	if !strings.Contains(out, "Commands:") || !strings.Contains(out, "update") {

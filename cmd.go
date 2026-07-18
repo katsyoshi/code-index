@@ -20,7 +20,7 @@ type command struct {
 var commands = []command{
 	{name: "help", usage: "code-index help [COMMAND]", summary: "show command help"},
 	{name: "version", usage: "code-index version [--format text|json]", summary: "show build and schema information"},
-	{name: "path", usage: "code-index path ROOT", summary: "print the default database path for a root"},
+	{name: "path", usage: "code-index path [--format text|json] ROOT", summary: "print the default database path for a root"},
 	{name: "init", usage: "code-index init [--db DB] ROOT", summary: "initialize an empty index database"},
 	{name: "rebuild", usage: "code-index rebuild [--db DB] [--max-bytes N] ROOT", summary: "atomically rebuild the full index"},
 	{name: "update", usage: "code-index update [--db DB] [--max-bytes N] [--adopt] ROOT", summary: "create or incrementally refresh the index"},
@@ -164,13 +164,28 @@ func cmdVersion(args []string) error {
 }
 
 func cmdPath(args []string) error {
-	if len(args) != 1 {
+	fs := flag.NewFlagSet("path", flag.ExitOnError)
+	formatFlag := fs.String("format", "text", "output format: text or json")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
 		return errors.New(commandUsage("path"))
 	}
-	root, err := filepath.Abs(args[0])
+	format, err := parseOutputFormat(*formatFlag)
 	if err != nil {
 		return err
 	}
-	fmt.Println(defaultDBPath(root))
+	root, err := filepath.Abs(fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	path := defaultDBPath(root)
+	if format == outputFormatJSON {
+		return writeJSON(os.Stdout, struct {
+			Path string `json:"path"`
+		}{Path: path})
+	}
+	fmt.Println(path)
 	return nil
 }

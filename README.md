@@ -189,6 +189,15 @@ The JSON format emits one object with native counts and booleans. Unavailable me
 
 The default database is stored under `CODE_INDEX_CACHE_DIR` when set. Otherwise it uses `$XDG_CACHE_HOME/code-index` or `~/.cache/code-index`, keyed by the absolute repository path. Use `--db` to provide an explicit database path.
 
+Print the default database path without creating it:
+
+```sh
+./code-index path /path/to/repo
+./code-index path --format json /path/to/repo
+```
+
+The JSON format emits one object with a `path` field.
+
 `rebuild` and `update` index Git-tracked files only. Initialize Git and add files before indexing a directory.
 
 ## Git Hooks
