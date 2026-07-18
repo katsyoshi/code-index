@@ -157,8 +157,8 @@ Common commands:
 # Find files by path.
 "$TOOL" files --root "$PWD" repository
 
-# Inspect the available tables and columns.
-"$TOOL" schema --root "$PWD"
+# Inspect the available tables and columns in the agent-oriented format.
+"$TOOL" schema --root "$PWD" --format json
 
 # Show source from indexed lines.
 "$TOOL" show --root "$PWD" --line 42 lib/user_repository.rb

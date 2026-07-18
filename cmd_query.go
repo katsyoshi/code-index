@@ -3,11 +3,22 @@ package main
 import (
 	"errors"
 	"flag"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
+
+type schemaJSONRow struct {
+	TableName  string  `json:"table_name"`
+	Ordinal    int     `json:"ordinal"`
+	ColumnName string  `json:"column_name"`
+	Type       string  `json:"type"`
+	Nullable   bool    `json:"nullable"`
+	Key        *string `json:"key"`
+}
 
 func cmdDefs(args []string) error {
 	fs := flag.NewFlagSet("defs", flag.ExitOnError)
@@ -119,13 +130,64 @@ func cmdSchema(args []string) error {
 	fs := flag.NewFlagSet("schema", flag.ExitOnError)
 	root := fs.String("root", "", "repository root for default database path")
 	db := fs.String("db", "", "database path")
+	formatFlag := fs.String("format", "text", "output format: text or json")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
 		return errors.New(commandUsage("schema"))
 	}
-	return runSQLitePrint(requiredDB(*db, *root), mustEmbeddedSQL("schema_query.sql"))
+	format, err := parseOutputFormat(*formatFlag)
+	if err != nil {
+		return err
+	}
+	dbPath := requiredDB(*db, *root)
+	if format == outputFormatText {
+		return runSQLitePrint(dbPath, mustEmbeddedSQL("schema_query.sql"))
+	}
+	rows, err := loadSchemaJSONRows(dbPath)
+	if err != nil {
+		return err
+	}
+	return writeJSON(os.Stdout, rows)
+}
+
+func loadSchemaJSONRows(db string) ([]schemaJSONRow, error) {
+	notice, err := queryLockNotice(db)
+	if err != nil {
+		return nil, err
+	}
+	if notice != "" {
+		fmt.Fprint(os.Stderr, notice)
+	}
+	out, err := sqliteQueryOutput(db, mustEmbeddedSQL("schema_query_json.sql"))
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]schemaJSONRow, 0)
+	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		if line == "" {
+			continue
+		}
+		columns := strings.Split(line, "\t")
+		if len(columns) != 6 {
+			return nil, fmt.Errorf("unexpected schema row from sqlite3: %q", line)
+		}
+		ordinal, err := strconv.Atoi(columns[1])
+		if err != nil {
+			return nil, fmt.Errorf("invalid schema ordinal %q: %w", columns[1], err)
+		}
+		row := schemaJSONRow{
+			TableName:  columns[0],
+			Ordinal:    ordinal,
+			ColumnName: columns[2],
+			Type:       columns[3],
+			Nullable:   columns[4] == "1",
+			Key:        stringPointer(columns[5]),
+		}
+		rows = append(rows, row)
+	}
+	return rows, nil
 }
 
 func cmdMetrics(args []string) error {

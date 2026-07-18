@@ -146,9 +146,11 @@ Show the current index tables and columns:
 
 ```sh
 ./code-index schema --root /path/to/repo
+./code-index schema --root /path/to/repo --format json
 ```
 
 `schema` reports user-facing tables, virtual tables, column types, nullability, and primary-key positions. SQLite and FTS5 internal tables are omitted.
+The JSON format emits an array with native numbers and booleans; `key` is `null` for columns that are not part of a primary key.
 
 Show indexed code metrics:
 

@@ -140,6 +140,41 @@ func TestSchemaCommandShowsUserTablesAndColumns(t *testing.T) {
 	if strings.Contains(out, "files_fts_data") {
 		t.Fatalf("schema output includes FTS shadow table: %q", out)
 	}
+
+	jsonOut := captureRunOutput(t, []string{"schema", "--db", db, "--format", "json"})
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(jsonOut), &rows); err != nil {
+		t.Fatalf("schema JSON = %q: %v", jsonOut, err)
+	}
+	if len(rows) == 0 {
+		t.Fatal("schema JSON is empty")
+	}
+	findRow := func(table, column string) map[string]any {
+		t.Helper()
+		for _, row := range rows {
+			if row["table_name"] == table && row["column_name"] == column {
+				return row
+			}
+		}
+		t.Fatalf("schema JSON has no %s.%s row: %q", table, column, jsonOut)
+		return nil
+	}
+	line := findRow("lines", "line")
+	if line["ordinal"] != float64(2) || line["type"] != "INTEGER" || line["nullable"] != false || line["key"] != "primary(2)" {
+		t.Fatalf("schema JSON lines.line = %#v", line)
+	}
+	name := findRow("symbols", "name")
+	if name["nullable"] != false || name["key"] != nil {
+		t.Fatalf("schema JSON symbols.name = %#v", name)
+	}
+	for _, row := range rows {
+		if strings.HasPrefix(row["table_name"].(string), "files_fts_") {
+			t.Fatalf("schema JSON includes FTS shadow table: %q", jsonOut)
+		}
+	}
+	if err := run([]string{"schema", "--db", db, "--format", "yaml"}); err == nil || !strings.Contains(err.Error(), "unsupported output format") {
+		t.Fatalf("schema with unsupported format error = %v", err)
+	}
 	if err := run([]string{"schema", "--db", db, "extra"}); err == nil {
 		t.Fatal("schema with extra arg succeeded, want failure")
 	}
