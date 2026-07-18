@@ -127,6 +127,35 @@ func TestStatsCommandRejectsExtraArgs(t *testing.T) {
 	}
 }
 
+func TestStatsCommandJSONOutputUsesNativeTypesAndNulls(t *testing.T) {
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		t.Skip("sqlite3 command not found")
+	}
+	root := t.TempDir()
+	db := filepath.Join(t.TempDir(), "index.sqlite")
+	if err := run([]string{"init", "--db", db, root}); err != nil {
+		t.Fatal(err)
+	}
+
+	var result statsJSONResult
+	decodeRunJSON(t, []string{"stats", "--db", db, "--format", "json"}, &result)
+	if result.Root == nil || *result.Root != root || result.SchemaVersion == nil || *result.SchemaVersion != 1 || result.FileSource == nil || *result.FileSource != fileSource {
+		t.Fatalf("stats JSON metadata = %#v", result)
+	}
+	if result.Files != 0 || result.Symbols != 0 || result.Lines != 0 || result.CodeLines != 0 || result.CommentLines != 0 || result.BlankLines != 0 {
+		t.Fatalf("stats JSON counts = %#v", result)
+	}
+	if result.FTS5 == nil || *result.FTS5 != hasFTS5() {
+		t.Fatalf("stats JSON fts5 = %#v, want %t", result.FTS5, hasFTS5())
+	}
+	if result.VCSDirty != nil {
+		t.Fatalf("stats JSON vcs_dirty = %#v, want null", result.VCSDirty)
+	}
+	if err := run([]string{"stats", "--db", db, "--format", "yaml"}); err == nil || !strings.Contains(err.Error(), "unsupported output format") {
+		t.Fatalf("stats with unsupported format error = %v", err)
+	}
+}
+
 func TestSchemaCommandShowsUserTablesAndColumns(t *testing.T) {
 	if _, err := exec.LookPath("sqlite3"); err != nil {
 		t.Skip("sqlite3 command not found")

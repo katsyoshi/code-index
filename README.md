@@ -178,6 +178,15 @@ Show indexed code metrics:
 
 For `defs`, `files`, `show`, and `metrics`, the JSON format emits an array of objects, uses native JSON numbers, preserves nullable fields as `null`, and emits `[]` when there are no rows.
 
+Show index-wide counts and build metadata:
+
+```sh
+./code-index stats --root /path/to/repo
+./code-index stats --root /path/to/repo --format json
+```
+
+The JSON format emits one object with native counts and booleans. Unavailable metadata fields are `null`.
+
 The default database is stored under `CODE_INDEX_CACHE_DIR` when set. Otherwise it uses `$XDG_CACHE_HOME/code-index` or `~/.cache/code-index`, keyed by the absolute repository path. Use `--db` to provide an explicit database path.
 
 `rebuild` and `update` index Git-tracked files only. Initialize Git and add files before indexing a directory.

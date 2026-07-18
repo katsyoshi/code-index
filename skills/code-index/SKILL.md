@@ -160,6 +160,9 @@ Common commands:
 # Inspect the available tables and columns in the agent-oriented format.
 "$TOOL" schema --root "$PWD" --format json
 
+# Show index-wide counts and build metadata.
+"$TOOL" stats --root "$PWD" --format json
+
 # Show source from indexed lines.
 "$TOOL" show --root "$PWD" --line 42 --format json lib/user_repository.rb
 ```

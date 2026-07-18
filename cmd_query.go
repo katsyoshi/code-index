@@ -61,6 +61,52 @@ type metricsFileJSONRow struct {
 	Symbols  int     `json:"symbols"`
 }
 
+type statsJSONRaw struct {
+	Root          *string `json:"root"`
+	SchemaVersion *int64  `json:"schema_version"`
+	FileSource    *string `json:"file_source"`
+	IndexedAt     *string `json:"indexed_at"`
+	UpdatedAt     *string `json:"updated_at"`
+	LastOperation *string `json:"last_operation"`
+	VCSKind       *string `json:"vcs_kind"`
+	VCSRevision   *string `json:"vcs_revision"`
+	VCSRef        *string `json:"vcs_ref"`
+	VCSHead       *string `json:"vcs_head"`
+	VCSBranch     *string `json:"vcs_branch"`
+	VCSDirty      *int    `json:"vcs_dirty"`
+	Files         int64   `json:"files"`
+	Symbols       int64   `json:"symbols"`
+	Lines         int64   `json:"lines"`
+	CodeLines     int64   `json:"code_lines"`
+	CommentLines  int64   `json:"comment_lines"`
+	BlankLines    int64   `json:"blank_lines"`
+	HashAlgorithm *string `json:"hash_algorithm"`
+	FTS5          *int    `json:"fts5"`
+}
+
+type statsJSONResult struct {
+	Root          *string `json:"root"`
+	SchemaVersion *int64  `json:"schema_version"`
+	FileSource    *string `json:"file_source"`
+	IndexedAt     *string `json:"indexed_at"`
+	UpdatedAt     *string `json:"updated_at"`
+	LastOperation *string `json:"last_operation"`
+	VCSKind       *string `json:"vcs_kind"`
+	VCSRevision   *string `json:"vcs_revision"`
+	VCSRef        *string `json:"vcs_ref"`
+	VCSHead       *string `json:"vcs_head"`
+	VCSBranch     *string `json:"vcs_branch"`
+	VCSDirty      *bool   `json:"vcs_dirty"`
+	Files         int64   `json:"files"`
+	Symbols       int64   `json:"symbols"`
+	Lines         int64   `json:"lines"`
+	CodeLines     int64   `json:"code_lines"`
+	CommentLines  int64   `json:"comment_lines"`
+	BlankLines    int64   `json:"blank_lines"`
+	HashAlgorithm *string `json:"hash_algorithm"`
+	FTS5          *bool   `json:"fts5"`
+}
+
 func cmdDefs(args []string) error {
 	fs := flag.NewFlagSet("defs", flag.ExitOnError)
 	root := fs.String("root", "", "repository root for default database path")
@@ -210,13 +256,59 @@ func cmdStats(args []string) error {
 	fs := flag.NewFlagSet("stats", flag.ExitOnError)
 	root := fs.String("root", "", "repository root for default database path")
 	db := fs.String("db", "", "database path")
+	formatFlag := fs.String("format", "text", "output format: text or json")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
 		return errors.New(commandUsage("stats"))
 	}
-	return runSQLitePrint(requiredDB(*db, *root), mustEmbeddedSQL("stats.sql"))
+	format, err := parseOutputFormat(*formatFlag)
+	if err != nil {
+		return err
+	}
+	dbPath := requiredDB(*db, *root)
+	if format == outputFormatText {
+		return runSQLitePrint(dbPath, mustEmbeddedSQL("stats.sql"))
+	}
+	rows := make([]statsJSONRaw, 0, 1)
+	if err := sqliteJSONQuery(dbPath, mustEmbeddedSQL("stats_json.sql"), &rows); err != nil {
+		return err
+	}
+	if len(rows) != 1 {
+		return fmt.Errorf("unexpected stats row count: %d", len(rows))
+	}
+	raw := rows[0]
+	result := statsJSONResult{
+		Root:          raw.Root,
+		SchemaVersion: raw.SchemaVersion,
+		FileSource:    raw.FileSource,
+		IndexedAt:     raw.IndexedAt,
+		UpdatedAt:     raw.UpdatedAt,
+		LastOperation: raw.LastOperation,
+		VCSKind:       raw.VCSKind,
+		VCSRevision:   raw.VCSRevision,
+		VCSRef:        raw.VCSRef,
+		VCSHead:       raw.VCSHead,
+		VCSBranch:     raw.VCSBranch,
+		VCSDirty:      integerBoolPointer(raw.VCSDirty),
+		Files:         raw.Files,
+		Symbols:       raw.Symbols,
+		Lines:         raw.Lines,
+		CodeLines:     raw.CodeLines,
+		CommentLines:  raw.CommentLines,
+		BlankLines:    raw.BlankLines,
+		HashAlgorithm: raw.HashAlgorithm,
+		FTS5:          integerBoolPointer(raw.FTS5),
+	}
+	return writeJSON(os.Stdout, result)
+}
+
+func integerBoolPointer(value *int) *bool {
+	if value == nil || (*value != 0 && *value != 1) {
+		return nil
+	}
+	return boolPointer(*value == 1)
 }
 
 func cmdSchema(args []string) error {
