@@ -136,7 +136,12 @@ Run read-only SQL:
 ```sh
 ./code-index sql --root /path/to/repo \
   "select path, line, kind, name, signature from symbols where name like '%parse%' order by path, line limit 50"
+
+./code-index sql --root /path/to/repo --format json \
+  "select path, line, kind, name, signature from symbols where name like '%parse%' order by path, line limit 50"
 ```
+
+The JSON format emits an array of objects with SQLite numbers and nulls preserved. Use unique column names or explicit aliases in JSON queries; duplicate column names are ambiguous when represented as object fields.
 
 Show indexed source around a line:
 

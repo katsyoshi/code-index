@@ -24,7 +24,7 @@ var commands = []command{
 	{name: "update", usage: "code-index update [--db DB] [--max-bytes N] [--adopt] ROOT", summary: "create or incrementally refresh the index"},
 	{name: "defs", usage: "code-index defs [--root ROOT|--db DB] [--kind KIND] [--language LANG] [--format text|json] QUERY", summary: "find symbol definitions"},
 	{name: "files", usage: "code-index files [--root ROOT|--db DB] [--language LANG] [--format text|json] QUERY", summary: "find indexed files"},
-	{name: "sql", usage: "code-index sql [--root ROOT|--db DB] [SQL]", summary: "run read-only SQL"},
+	{name: "sql", usage: "code-index sql [--root ROOT|--db DB] [--format text|json] [SQL]", summary: "run read-only SQL"},
 	{name: "show", usage: "code-index show [--root ROOT|--db DB] --line N [--context N] [--format text|json] PATH", summary: "show indexed source around a line"},
 	{name: "schema", usage: "code-index schema [--root ROOT|--db DB] [--format text|json]", summary: "show index tables and columns"},
 	{name: "stats", usage: "code-index stats [--root ROOT|--db DB]", summary: "show index table counts"},

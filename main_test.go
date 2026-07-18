@@ -245,6 +245,40 @@ func TestQueryCommandsJSONOutput(t *testing.T) {
 	}
 }
 
+func TestSQLCommandJSONOutputPreservesDynamicTypes(t *testing.T) {
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		t.Skip("sqlite3 command not found")
+	}
+	root := t.TempDir()
+	db := filepath.Join(t.TempDir(), "index.sqlite")
+	if err := run([]string{"init", "--db", db, root}); err != nil {
+		t.Fatal(err)
+	}
+
+	var rows []struct {
+		IntegerValue int64   `json:"integer_value"`
+		RealValue    float64 `json:"real_value"`
+		Missing      *string `json:"missing"`
+		TextValue    string  `json:"text_value"`
+	}
+	decodeRunJSON(t, []string{
+		"sql", "--db", db, "--format", "json",
+		"select 9007199254740993 as integer_value, 1.5 as real_value, null as missing, 'a' || char(9) || 'b' as text_value",
+	}, &rows)
+	if len(rows) != 1 || rows[0].IntegerValue != 9007199254740993 || rows[0].RealValue != 1.5 || rows[0].Missing != nil || rows[0].TextValue != "a\tb" {
+		t.Fatalf("sql JSON = %#v", rows)
+	}
+
+	var empty []map[string]any
+	decodeRunJSON(t, []string{"sql", "--db", db, "--format", "json", "select 1 as value where 0"}, &empty)
+	if empty == nil || len(empty) != 0 {
+		t.Fatalf("empty sql JSON = %#v, want []", empty)
+	}
+	if err := run([]string{"sql", "--db", db, "--format", "yaml", "select 1"}); err == nil || !strings.Contains(err.Error(), "unsupported output format") {
+		t.Fatalf("sql with unsupported format error = %v", err)
+	}
+}
+
 func TestIndexLockPreventsConcurrentBuilds(t *testing.T) {
 	db := filepath.Join(t.TempDir(), "index.sqlite")
 	lock, err := acquireIndexLock(db, "rebuild", "/repo")

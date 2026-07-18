@@ -147,7 +147,9 @@ func sqliteJSONQuery(db, sql string, destination any) error {
 	if len(bytes.TrimSpace(out)) == 0 {
 		out = []byte("[]")
 	}
-	if err := json.Unmarshal(out, destination); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(out))
+	decoder.UseNumber()
+	if err := decoder.Decode(destination); err != nil {
 		return fmt.Errorf("invalid JSON from sqlite3: %w", err)
 	}
 	return nil

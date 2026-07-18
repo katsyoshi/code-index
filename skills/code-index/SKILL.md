@@ -100,7 +100,7 @@ If `status` is unsupported, continue with query commands and rely on rebuild out
 8. Run raw read-only SQL for precise lookup:
 
 ```bash
-"$TOOL" sql --root "$PWD" \
+"$TOOL" sql --root "$PWD" --format json \
   "select path, line, kind, name, signature from symbols where name like '%parse%' order by path, line limit 50"
 ```
 

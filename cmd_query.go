@@ -137,7 +137,12 @@ func cmdSQL(args []string) error {
 	fs := flag.NewFlagSet("sql", flag.ExitOnError)
 	root := fs.String("root", "", "repository root for default database path")
 	db := fs.String("db", "", "database path")
+	formatFlag := fs.String("format", "text", "output format: text or json")
 	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	format, err := parseOutputFormat(*formatFlag)
+	if err != nil {
 		return err
 	}
 	var query string
@@ -155,7 +160,15 @@ func cmdSQL(args []string) error {
 	if err := validateReadOnlySQL(query); err != nil {
 		return err
 	}
-	return runSQLitePrint(requiredDB(*db, *root), query)
+	dbPath := requiredDB(*db, *root)
+	if format == outputFormatText {
+		return runSQLitePrint(dbPath, query)
+	}
+	rows := make([]map[string]any, 0)
+	if err := sqliteJSONQuery(dbPath, query, &rows); err != nil {
+		return err
+	}
+	return writeJSON(os.Stdout, rows)
 }
 
 func cmdShow(args []string) error {
