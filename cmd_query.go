@@ -115,6 +115,19 @@ func cmdStats(args []string) error {
 	return runSQLitePrint(requiredDB(*db, *root), mustEmbeddedSQL("stats.sql"))
 }
 
+func cmdSchema(args []string) error {
+	fs := flag.NewFlagSet("schema", flag.ExitOnError)
+	root := fs.String("root", "", "repository root for default database path")
+	db := fs.String("db", "", "database path")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return errors.New(commandUsage("schema"))
+	}
+	return runSQLitePrint(requiredDB(*db, *root), mustEmbeddedSQL("schema_query.sql"))
+}
+
 func cmdMetrics(args []string) error {
 	fs := flag.NewFlagSet("metrics", flag.ExitOnError)
 	root := fs.String("root", "", "repository root for default database path")

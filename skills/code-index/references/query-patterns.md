@@ -2,6 +2,8 @@
 
 ## Schema
 
+Run `code-index schema --root "$PWD"` to inspect the tables and columns in the current database. The reference below describes the expected current schema.
+
 `files`
 
 - `id`: integer primary key

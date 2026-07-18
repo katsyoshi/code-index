@@ -139,6 +139,14 @@ Show indexed source around a line:
 ./code-index show --root /path/to/repo --line 42 lib/config.rb
 ```
 
+Show the current index tables and columns:
+
+```sh
+./code-index schema --root /path/to/repo
+```
+
+`schema` reports user-facing tables, virtual tables, column types, nullability, and primary-key positions. SQLite and FTS5 internal tables are omitted.
+
 Show indexed code metrics:
 
 ```sh

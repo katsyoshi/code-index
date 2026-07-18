@@ -115,6 +115,35 @@ func TestStatsCommandRejectsExtraArgs(t *testing.T) {
 	}
 }
 
+func TestSchemaCommandShowsUserTablesAndColumns(t *testing.T) {
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		t.Skip("sqlite3 command not found")
+	}
+	root := t.TempDir()
+	db := filepath.Join(t.TempDir(), "index.sqlite")
+	if err := run([]string{"init", "--db", db, root}); err != nil {
+		t.Fatal(err)
+	}
+
+	out := captureRunOutput(t, []string{"schema", "--db", db})
+	for _, want := range []string{
+		"table_name\tordinal\tcolumn_name\ttype\tnullable\tkey",
+		"files\t1\tid\tINTEGER\tno\tprimary(1)",
+		"lines\t2\tline\tINTEGER\tno\tprimary(2)",
+		"symbols\t6\tname\tTEXT\tno\t-",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("schema output = %q, want %q", out, want)
+		}
+	}
+	if strings.Contains(out, "files_fts_data") {
+		t.Fatalf("schema output includes FTS shadow table: %q", out)
+	}
+	if err := run([]string{"schema", "--db", db, "extra"}); err == nil {
+		t.Fatal("schema with extra arg succeeded, want failure")
+	}
+}
+
 func TestIndexLockPreventsConcurrentBuilds(t *testing.T) {
 	db := filepath.Join(t.TempDir(), "index.sqlite")
 	lock, err := acquireIndexLock(db, "rebuild", "/repo")
