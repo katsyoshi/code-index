@@ -10,14 +10,49 @@ import (
 	"path/filepath"
 )
 
+type fullBuildJSONResult struct {
+	Operation     string  `json:"operation"`
+	DB            string  `json:"db"`
+	Root          string  `json:"root"`
+	Skipped       bool    `json:"skipped"`
+	Reason        *string `json:"reason"`
+	Files         *int    `json:"files"`
+	Symbols       *int    `json:"symbols"`
+	Lines         *int    `json:"lines"`
+	CodeLines     *int    `json:"code_lines"`
+	CommentLines  *int    `json:"comment_lines"`
+	BlankLines    *int    `json:"blank_lines"`
+	HashAlgorithm *string `json:"hash_algorithm"`
+	FTS5          *bool   `json:"fts5"`
+}
+
+type updateJSONResult struct {
+	Operation     string  `json:"operation"`
+	DB            string  `json:"db"`
+	Root          string  `json:"root"`
+	Skipped       bool    `json:"skipped"`
+	Reason        *string `json:"reason"`
+	AddedFiles    *int    `json:"added_files"`
+	UpdatedFiles  *int    `json:"updated_files"`
+	DeletedFiles  *int    `json:"deleted_files"`
+	Symbols       *int    `json:"symbols"`
+	HashAlgorithm *string `json:"hash_algorithm"`
+	FTS5          *bool   `json:"fts5"`
+}
+
 func cmdInit(args []string) error {
 	flags := flag.NewFlagSet("init", flag.ExitOnError)
 	dbPath := flags.String("db", "", "database path")
+	formatFlag := flags.String("format", "text", "output format: text or json")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	if flags.NArg() != 1 {
 		return errors.New(commandUsage("init"))
+	}
+	format, err := parseOutputFormat(*formatFlag)
+	if err != nil {
+		return err
 	}
 	if _, err := exec.LookPath("sqlite3"); err != nil {
 		return errors.New("sqlite3 command not found")
@@ -47,6 +82,10 @@ func cmdInit(args []string) error {
 	fts := hasFTS5()
 	if err := createEmptyIndexDB(db, root, "init", fts, defaultBuildConfig()); err != nil {
 		return err
+	}
+	result := successfulFullBuildResult("init", db, root, 0, 0, 0, 0, 0, 0, fts)
+	if format == outputFormatJSON {
+		return writeJSON(os.Stdout, result)
 	}
 	fmt.Printf("db: %s\n", db)
 	fmt.Printf("root: %s\n", root)
@@ -99,6 +138,7 @@ type buildOptions struct {
 	maxBytes     int64
 	extraIgnored repeatedFlag
 	adopt        bool
+	format       outputFormat
 }
 
 func parseBuildOptions(commandName string, args []string, allowAdopt bool) (buildOptions, error) {
@@ -106,6 +146,7 @@ func parseBuildOptions(commandName string, args []string, allowAdopt bool) (buil
 	dbPath := flags.String("db", "", "database path")
 	maxBytes := flags.Int64("max-bytes", defaultMaxBytes, "skip files larger than this")
 	adopt := false
+	formatFlag := flags.String("format", "text", "output format: text or json")
 	var extraIgnored repeatedFlag
 	flags.Var(&extraIgnored, "ignore-dir", "extra directory name to ignore")
 	if allowAdopt {
@@ -116,6 +157,10 @@ func parseBuildOptions(commandName string, args []string, allowAdopt bool) (buil
 	}
 	if flags.NArg() != 1 {
 		return buildOptions{}, errors.New(commandUsage(commandName))
+	}
+	format, err := parseOutputFormat(*formatFlag)
+	if err != nil {
+		return buildOptions{}, err
 	}
 	if _, err := exec.LookPath("sqlite3"); err != nil {
 		return buildOptions{}, errors.New("sqlite3 command not found")
@@ -134,6 +179,7 @@ func parseBuildOptions(commandName string, args []string, allowAdopt bool) (buil
 		maxBytes:     *maxBytes,
 		extraIgnored: extraIgnored,
 		adopt:        adopt,
+		format:       format,
 	}, nil
 }
 
@@ -158,6 +204,9 @@ func runRebuild(args []string) error {
 	if err != nil {
 		if isIndexLocked(err) {
 			printLockSkipped(db)
+			if options.format == outputFormatJSON {
+				return writeJSON(os.Stdout, skippedFullBuildResult("rebuild", db, root))
+			}
 			return nil
 		}
 		return err
@@ -222,6 +271,10 @@ func runRebuild(args []string) error {
 		return err
 	}
 	installed = true
+	result := successfulFullBuildResult("rebuild", db, root, fileCount, symbolCount, lineCount, codeLineCount, commentLineCount, blankLineCount, fts)
+	if options.format == outputFormatJSON {
+		return writeJSON(os.Stdout, result)
+	}
 	fmt.Printf("db: %s\n", db)
 	fmt.Printf("root: %s\n", root)
 	fmt.Printf("files: %d\n", fileCount)
@@ -247,6 +300,9 @@ func runUpdate(args []string) error {
 			return err
 		} else if locked {
 			printLockSkipped(db)
+			if options.format == outputFormatJSON {
+				return writeJSON(os.Stdout, skippedUpdateResult(db, root))
+			}
 			return nil
 		}
 		return fmt.Errorf("index not found: %s; run init or rebuild first, or pass --db", db)
@@ -258,6 +314,9 @@ func runUpdate(args []string) error {
 	if err != nil {
 		if isIndexLocked(err) {
 			printLockSkipped(db)
+			if options.format == outputFormatJSON {
+				return writeJSON(os.Stdout, skippedUpdateResult(db, root))
+			}
 			return nil
 		}
 		return err
@@ -339,6 +398,10 @@ func runUpdate(args []string) error {
 		return err
 	}
 	writerOK = true
+	result := successfulUpdateResult(db, root, added, updated, deleted, symbolCount, fts)
+	if options.format == outputFormatJSON {
+		return writeJSON(os.Stdout, result)
+	}
 	fmt.Printf("db: %s\n", db)
 	fmt.Printf("root: %s\n", root)
 	fmt.Printf("added_files: %d\n", added)
@@ -348,6 +411,52 @@ func runUpdate(args []string) error {
 	fmt.Printf("hash_algorithm: %s\n", contentHashAlgorithm)
 	fmt.Printf("fts5: %s\n", yesNo(fts))
 	return nil
+}
+
+func successfulFullBuildResult(operation, db, root string, files, symbols, lines, codeLines, commentLines, blankLines int, fts bool) fullBuildJSONResult {
+	hashAlgorithm := contentHashAlgorithm
+	return fullBuildJSONResult{
+		Operation:     operation,
+		DB:            db,
+		Root:          root,
+		Files:         intResultPointer(files),
+		Symbols:       intResultPointer(symbols),
+		Lines:         intResultPointer(lines),
+		CodeLines:     intResultPointer(codeLines),
+		CommentLines:  intResultPointer(commentLines),
+		BlankLines:    intResultPointer(blankLines),
+		HashAlgorithm: &hashAlgorithm,
+		FTS5:          boolPointer(fts),
+	}
+}
+
+func skippedFullBuildResult(operation, db, root string) fullBuildJSONResult {
+	reason := "locked"
+	return fullBuildJSONResult{Operation: operation, DB: db, Root: root, Skipped: true, Reason: &reason}
+}
+
+func successfulUpdateResult(db, root string, added, updated, deleted, symbols int, fts bool) updateJSONResult {
+	hashAlgorithm := contentHashAlgorithm
+	return updateJSONResult{
+		Operation:     "update",
+		DB:            db,
+		Root:          root,
+		AddedFiles:    intResultPointer(added),
+		UpdatedFiles:  intResultPointer(updated),
+		DeletedFiles:  intResultPointer(deleted),
+		Symbols:       intResultPointer(symbols),
+		HashAlgorithm: &hashAlgorithm,
+		FTS5:          boolPointer(fts),
+	}
+}
+
+func skippedUpdateResult(db, root string) updateJSONResult {
+	reason := "locked"
+	return updateJSONResult{Operation: "update", DB: db, Root: root, Skipped: true, Reason: &reason}
+}
+
+func intResultPointer(value int) *int {
+	return &value
 }
 
 func validateUpdateCompatibility(meta map[string]string, root string, config buildConfig, fts bool, adopt bool) error {

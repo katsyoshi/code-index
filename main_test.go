@@ -481,6 +481,11 @@ func TestRebuildSkipsWhenLocked(t *testing.T) {
 	if err := run([]string{"rebuild", "--db", db, root}); err != nil {
 		t.Fatal(err)
 	}
+	var result fullBuildJSONResult
+	decodeRunJSON(t, []string{"rebuild", "--db", db, "--format", "json", root}, &result)
+	if result.Operation != "rebuild" || !result.Skipped || result.Reason == nil || *result.Reason != "locked" || result.Files != nil || result.FTS5 != nil {
+		t.Fatalf("skipped rebuild JSON = %#v", result)
+	}
 	if _, err := os.Stat(db); !os.IsNotExist(err) {
 		t.Fatalf("db exists after skipped rebuild or returned unexpected error: %v", err)
 	}
@@ -504,8 +509,62 @@ func TestUpdateSkipsWhenLockedWithoutExistingDB(t *testing.T) {
 	if err := run([]string{"update", "--db", db, root}); err != nil {
 		t.Fatal(err)
 	}
+	var result updateJSONResult
+	decodeRunJSON(t, []string{"update", "--db", db, "--format", "json", root}, &result)
+	if result.Operation != "update" || !result.Skipped || result.Reason == nil || *result.Reason != "locked" || result.AddedFiles != nil || result.FTS5 != nil {
+		t.Fatalf("skipped update JSON = %#v", result)
+	}
 	if _, err := os.Stat(db); !os.IsNotExist(err) {
 		t.Fatalf("db exists after skipped update or returned unexpected error: %v", err)
+	}
+}
+
+func TestBuildCommandsJSONOutput(t *testing.T) {
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		t.Skip("sqlite3 command not found")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git command not found")
+	}
+	root := t.TempDir()
+	path := filepath.Join(root, "main.go")
+	if err := os.WriteFile(path, []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	initGitRepo(t, root, "main.go")
+
+	initDB := filepath.Join(t.TempDir(), "init.sqlite")
+	var initialized fullBuildJSONResult
+	decodeRunJSON(t, []string{"init", "--db", initDB, "--format", "json", root}, &initialized)
+	if initialized.Operation != "init" || initialized.Skipped || initialized.Files == nil || *initialized.Files != 0 || initialized.FTS5 == nil || *initialized.FTS5 != hasFTS5() {
+		t.Fatalf("init JSON = %#v", initialized)
+	}
+
+	db := filepath.Join(t.TempDir(), "index.sqlite")
+	var rebuilt fullBuildJSONResult
+	decodeRunJSON(t, []string{"rebuild", "--db", db, "--format", "json", root}, &rebuilt)
+	if rebuilt.Operation != "rebuild" || rebuilt.Skipped || rebuilt.Files == nil || *rebuilt.Files != 1 || rebuilt.Symbols == nil || *rebuilt.Symbols != 1 || rebuilt.Lines == nil || *rebuilt.Lines != 3 || rebuilt.Reason != nil {
+		t.Fatalf("rebuild JSON = %#v", rebuilt)
+	}
+
+	if err := os.WriteFile(path, []byte("package main\n\nfunc changed() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var updated updateJSONResult
+	decodeRunJSON(t, []string{"update", "--db", db, "--format", "json", root}, &updated)
+	if updated.Operation != "update" || updated.Skipped || updated.AddedFiles == nil || *updated.AddedFiles != 0 || updated.UpdatedFiles == nil || *updated.UpdatedFiles != 1 || updated.DeletedFiles == nil || *updated.DeletedFiles != 0 || updated.Symbols == nil || *updated.Symbols != 1 || updated.Reason != nil {
+		t.Fatalf("update JSON = %#v", updated)
+	}
+
+	invalidFormatArgs := [][]string{
+		{"init", "--db", filepath.Join(t.TempDir(), "invalid.sqlite"), "--format", "yaml", root},
+		{"rebuild", "--db", filepath.Join(t.TempDir(), "invalid.sqlite"), "--format", "yaml", root},
+		{"update", "--db", db, "--format", "yaml", root},
+	}
+	for _, args := range invalidFormatArgs {
+		if err := run(args); err == nil || !strings.Contains(err.Error(), "unsupported output format") {
+			t.Fatalf("%s with unsupported format error = %v", args[0], err)
+		}
 	}
 }
 

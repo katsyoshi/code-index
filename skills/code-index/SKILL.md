@@ -69,13 +69,13 @@ export CODE_INDEX_CACHE_DIR="${CODE_INDEX_CACHE_DIR:-/tmp/code-index}"
 5. Build or refresh the index before substantial search work. Prefer `update` for an existing index; it refreshes changed Git-tracked files and removes files no longer tracked by Git:
 
 ```bash
-"$TOOL" update "$PWD"
+"$TOOL" update --format json "$PWD"
 ```
 
 If `update` reports that the index does not exist yet, run `rebuild` explicitly:
 
 ```bash
-"$TOOL" rebuild "$PWD"
+"$TOOL" rebuild --format json "$PWD"
 ```
 
 If `update` reports incompatible schema, file source, hash, or indexing config settings, run `rebuild`. If it reports another checkout path or unknown Git history, run `rebuild` unless the user explicitly wants this DB to belong to the current checkout; only then use `update --adopt`.
@@ -137,16 +137,16 @@ Common commands:
 "$TOOL" version --format json
 
 # Initialize an empty schema when explicitly needed.
-"$TOOL" init "$PWD"
+"$TOOL" init --format json "$PWD"
 
 # Atomic full rebuild from Git-tracked files. Current CLI skips successfully if another operation holds the lock.
-"$TOOL" rebuild "$PWD"
+"$TOOL" rebuild --format json "$PWD"
 
 # Incrementally refresh an existing index from Git-tracked files.
-"$TOOL" update "$PWD"
+"$TOOL" update --format json "$PWD"
 
 # Adopt an index from another checkout path or Git history only when intentional.
-"$TOOL" update --adopt "$PWD"
+"$TOOL" update --adopt --format json "$PWD"
 
 # Show lock state and metadata from the last successful update in the agent-oriented format.
 "$TOOL" status --root "$PWD" --format json

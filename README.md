@@ -77,6 +77,7 @@ Update an existing index incrementally:
 
 ```sh
 ./code-index update /path/to/repo
+./code-index update --format json /path/to/repo
 ```
 
 `update` requires an existing index database and a Git work tree. It refreshes changed Git-tracked files and removes files that are no longer tracked. If the index does not exist yet, run `init` or `rebuild` first.
@@ -93,6 +94,7 @@ Rebuild an index atomically from Git-tracked files:
 
 ```sh
 ./code-index rebuild /path/to/repo
+./code-index rebuild --format json /path/to/repo
 ```
 
 `rebuild` requires a Git work tree and indexes files reported by `git ls-files`. If another `init`, `rebuild`, or `update` is already running for the same database, `rebuild` skips and exits successfully.
@@ -101,9 +103,12 @@ Initialize an empty index database:
 
 ```sh
 ./code-index init /path/to/repo
+./code-index init --format json /path/to/repo
 ```
 
 `init` creates the schema and metadata only. It fails if the index database already exists.
+
+For `init`, `rebuild`, and `update`, the JSON format emits one operation-result object with native counts and booleans. If `rebuild` or `update` skips because another index operation holds the lock, it exits successfully with `skipped: true`, `reason: "locked"`, and unavailable result fields set to `null`; the warning remains on stderr.
 
 Show index status:
 
