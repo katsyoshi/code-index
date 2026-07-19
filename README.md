@@ -128,7 +128,11 @@ Show command help:
 ```sh
 ./code-index help
 ./code-index help update
+./code-index help --format json
+./code-index help --format json update
 ```
+
+The JSON format returns the top-level usage and command metadata. Whole-program help contains a `commands` array; command-specific help contains one object with `name`, `usage`, and `summary`.
 
 Find symbol definitions:
 

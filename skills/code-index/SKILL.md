@@ -129,6 +129,8 @@ Common commands:
 # Show command help.
 "$TOOL" help
 "$TOOL" help update
+"$TOOL" help --format json
+"$TOOL" help --format json update
 
 # Print the default database path for a root.
 "$TOOL" path --format json "$PWD"

@@ -17,8 +17,19 @@ type command struct {
 	summary string
 }
 
+type helpJSONCommand struct {
+	Name    string `json:"name"`
+	Usage   string `json:"usage"`
+	Summary string `json:"summary"`
+}
+
+type helpJSONResult struct {
+	Usage    string            `json:"usage"`
+	Commands []helpJSONCommand `json:"commands"`
+}
+
 var commands = []command{
-	{name: "help", usage: "code-index help [COMMAND]", summary: "show command help"},
+	{name: "help", usage: "code-index help [--format text|json] [COMMAND]", summary: "show command help"},
 	{name: "version", usage: "code-index version [--format text|json]", summary: "show build and schema information"},
 	{name: "path", usage: "code-index path [--format text|json] ROOT", summary: "print the default database path for a root"},
 	{name: "init", usage: "code-index init [--db DB] [--format text|json] ROOT", summary: "initialize an empty index database"},
@@ -86,16 +97,20 @@ func usage() {
 }
 
 func printUsage(w io.Writer) {
-	names := make([]string, 0, len(commands))
-	for _, cmd := range commands {
-		names = append(names, cmd.name)
-	}
-	fmt.Fprintf(w, "usage: code-index <%s> [options]\n", strings.Join(names, "|"))
+	fmt.Fprintf(w, "usage: %s\n", topLevelUsage())
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Commands:")
 	for _, cmd := range commands {
 		fmt.Fprintf(w, "  %-8s %s\n", cmd.name, cmd.summary)
 	}
+}
+
+func topLevelUsage() string {
+	names := make([]string, 0, len(commands))
+	for _, cmd := range commands {
+		names = append(names, cmd.name)
+	}
+	return fmt.Sprintf("code-index <%s> [options]", strings.Join(names, "|"))
 }
 
 func commandUsage(name string) string {
@@ -108,22 +123,41 @@ func commandUsage(name string) string {
 }
 
 func cmdHelp(args []string) error {
-	if len(args) == 0 {
+	fs := flag.NewFlagSet("help", flag.ExitOnError)
+	formatFlag := fs.String("format", "text", "output format: text or json")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() > 1 {
+		return errors.New(commandUsage("help"))
+	}
+	format, err := parseOutputFormat(*formatFlag)
+	if err != nil {
+		return err
+	}
+	if fs.NArg() == 0 {
+		if format == outputFormatJSON {
+			result := helpJSONResult{Usage: topLevelUsage(), Commands: make([]helpJSONCommand, 0, len(commands))}
+			for _, cmd := range commands {
+				result.Commands = append(result.Commands, helpJSONCommand{Name: cmd.name, Usage: cmd.usage, Summary: cmd.summary})
+			}
+			return writeJSON(os.Stdout, result)
+		}
 		printUsage(os.Stdout)
 		return nil
 	}
-	if len(args) != 1 {
-		return errors.New(commandUsage("help"))
-	}
 	for _, cmd := range commands {
-		if cmd.name == args[0] {
+		if cmd.name == fs.Arg(0) {
+			if format == outputFormatJSON {
+				return writeJSON(os.Stdout, helpJSONCommand{Name: cmd.name, Usage: cmd.usage, Summary: cmd.summary})
+			}
 			fmt.Println("usage: " + cmd.usage)
 			fmt.Println()
 			fmt.Println(cmd.summary)
 			return nil
 		}
 	}
-	return fmt.Errorf("unknown command: %s", args[0])
+	return fmt.Errorf("unknown command: %s", fs.Arg(0))
 }
 
 func cmdVersion(args []string) error {

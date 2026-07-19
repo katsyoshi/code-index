@@ -138,6 +138,19 @@ func TestHelpCommand(t *testing.T) {
 	if !strings.Contains(out, "usage: code-index update") {
 		t.Fatalf("help update output = %q, want update usage", out)
 	}
+	var all helpJSONResult
+	decodeRunJSON(t, []string{"help", "--format", "json"}, &all)
+	if all.Usage != topLevelUsage() || len(all.Commands) != len(commands) || all.Commands[0].Name != "help" {
+		t.Fatalf("help JSON = %#v", all)
+	}
+	var update helpJSONCommand
+	decodeRunJSON(t, []string{"help", "--format", "json", "update"}, &update)
+	if update.Name != "update" || !strings.Contains(update.Usage, "code-index update") || update.Summary == "" {
+		t.Fatalf("help update JSON = %#v", update)
+	}
+	if err := run([]string{"help", "--format", "yaml"}); err == nil || !strings.Contains(err.Error(), "unsupported output format") {
+		t.Fatalf("help with unsupported format error = %v", err)
+	}
 	if err := run([]string{"help", "missing"}); err == nil {
 		t.Fatal("help missing succeeded, want failure")
 	}
