@@ -47,7 +47,7 @@ func cmdInit(args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	if flags.NArg() != 1 {
+	if flags.NArg() > 1 {
 		return errors.New(commandUsage("init"))
 	}
 	format, err := parseOutputFormat(*formatFlag)
@@ -57,13 +57,24 @@ func cmdInit(args []string) error {
 	if _, err := exec.LookPath("sqlite3"); err != nil {
 		return errors.New("sqlite3 command not found")
 	}
-	root, err := resolveRoot(flags.Arg(0))
+	rootOption := ""
+	if flags.NArg() == 1 {
+		rootOption = flags.Arg(0)
+	}
+	root, err := resolveRootOrCurrent(rootOption)
+	if err != nil {
+		return err
+	}
+	config, err := resolveConfig(root)
 	if err != nil {
 		return err
 	}
 	db := *dbPath
 	if db == "" {
-		db = defaultDBPath(root)
+		db = config.db
+		if db == "" {
+			db = defaultDBPath(root)
+		}
 	}
 	if err := ensureIndexDoesNotExist(db); err != nil {
 		return err
@@ -80,7 +91,7 @@ func cmdInit(args []string) error {
 		return err
 	}
 	fts := hasFTS5()
-	if err := createEmptyIndexDB(db, root, "init", fts, defaultBuildConfig()); err != nil {
+	if err := createEmptyIndexDB(db, root, "init", fts, config.build); err != nil {
 		return err
 	}
 	result := successfulFullBuildResult("init", db, root, 0, 0, 0, 0, 0, 0, fts)
@@ -155,7 +166,7 @@ func parseBuildOptions(commandName string, args []string, allowAdopt bool) (buil
 	if err := flags.Parse(args); err != nil {
 		return buildOptions{}, err
 	}
-	if flags.NArg() != 1 {
+	if flags.NArg() > 1 {
 		return buildOptions{}, errors.New(commandUsage(commandName))
 	}
 	format, err := parseOutputFormat(*formatFlag)
@@ -165,19 +176,39 @@ func parseBuildOptions(commandName string, args []string, allowAdopt bool) (buil
 	if _, err := exec.LookPath("sqlite3"); err != nil {
 		return buildOptions{}, errors.New("sqlite3 command not found")
 	}
-	root, err := resolveRoot(flags.Arg(0))
+	rootOption := ""
+	if flags.NArg() == 1 {
+		rootOption = flags.Arg(0)
+	}
+	root, err := resolveRootOrCurrent(rootOption)
 	if err != nil {
 		return buildOptions{}, err
 	}
+	config, err := resolveConfig(root)
+	if err != nil {
+		return buildOptions{}, err
+	}
+	maxBytesSet := false
+	flags.Visit(func(f *flag.Flag) {
+		if f.Name == "max-bytes" {
+			maxBytesSet = true
+		}
+	})
+	if !maxBytesSet {
+		*maxBytes = config.build.maxBytes
+	}
 	db := *dbPath
 	if db == "" {
-		db = defaultDBPath(root)
+		db = config.db
+		if db == "" {
+			db = defaultDBPath(root)
+		}
 	}
 	return buildOptions{
 		root:         root,
 		db:           db,
 		maxBytes:     *maxBytes,
-		extraIgnored: extraIgnored,
+		extraIgnored: append(append(repeatedFlag{}, config.build.ignoreDirs...), extraIgnored...),
 		adopt:        adopt,
 		format:       format,
 	}, nil

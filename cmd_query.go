@@ -144,7 +144,10 @@ func cmdDefs(args []string) error {
 		query := fs.Arg(0)
 		sql = formatEmbeddedSQL("defs.sql", where, quote(query), quote(query+"%"), *limit)
 	}
-	dbPath := requiredDB(*db, *root)
+	dbPath, _, err := resolveDB(*db, *root)
+	if err != nil {
+		return err
+	}
 	if format == outputFormatText {
 		return runSQLitePrint(dbPath, sql)
 	}
@@ -182,7 +185,10 @@ func cmdFiles(args []string) error {
 		where += " and language = " + quote(*language)
 	}
 	sql := formatEmbeddedSQL("files.sql", where, *limit)
-	dbPath := requiredDB(*db, *root)
+	dbPath, _, err := resolveDB(*db, *root)
+	if err != nil {
+		return err
+	}
 	if format == outputFormatText {
 		return runSQLitePrint(dbPath, sql)
 	}
@@ -220,7 +226,10 @@ func cmdSQL(args []string) error {
 	if err := validateReadOnlySQL(query); err != nil {
 		return err
 	}
-	dbPath := requiredDB(*db, *root)
+	dbPath, _, err := resolveDB(*db, *root)
+	if err != nil {
+		return err
+	}
 	if format == outputFormatText {
 		return runSQLitePrint(dbPath, query)
 	}
@@ -255,7 +264,10 @@ func cmdShow(args []string) error {
 	}
 	end := *line + *context
 	sql := formatEmbeddedSQL("show.sql", quote(path), quote("%"+path), quote(path), start, end)
-	dbPath := requiredDB(*db, *root)
+	dbPath, _, err := resolveDB(*db, *root)
+	if err != nil {
+		return err
+	}
 	if format == outputFormatText {
 		return runSQLitePrint(dbPath, sql)
 	}
@@ -281,7 +293,10 @@ func cmdStats(args []string) error {
 	if err != nil {
 		return err
 	}
-	dbPath := requiredDB(*db, *root)
+	dbPath, _, err := resolveDB(*db, *root)
+	if err != nil {
+		return err
+	}
 	if format == outputFormatText {
 		return runSQLitePrint(dbPath, mustEmbeddedSQL("stats.sql"))
 	}
@@ -340,7 +355,10 @@ func cmdSchema(args []string) error {
 	if err != nil {
 		return err
 	}
-	dbPath := requiredDB(*db, *root)
+	dbPath, _, err := resolveDB(*db, *root)
+	if err != nil {
+		return err
+	}
 	if format == outputFormatText {
 		return runSQLitePrint(dbPath, mustEmbeddedSQL("schema_query.sql"))
 	}
@@ -411,7 +429,10 @@ func cmdMetrics(args []string) error {
 		where += " and language = " + quote(*language)
 	}
 	var sql string
-	dbPath := requiredDB(*db, *root)
+	dbPath, _, err := resolveDB(*db, *root)
+	if err != nil {
+		return err
+	}
 	if fs.NArg() == 0 {
 		sql = formatEmbeddedSQL("metrics_summary.sql", where, *limit)
 		if format == outputFormatJSON {

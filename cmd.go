@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -31,10 +30,10 @@ type helpJSONResult struct {
 var commands = []command{
 	{name: "help", usage: "code-index help [--format text|json] [COMMAND]", summary: "show command help"},
 	{name: "version", usage: "code-index version [--format text|json]", summary: "show build and schema information"},
-	{name: "path", usage: "code-index path [--format text|json] ROOT", summary: "print the default database path for a root"},
-	{name: "init", usage: "code-index init [--db DB] [--format text|json] ROOT", summary: "initialize an empty index database"},
-	{name: "rebuild", usage: "code-index rebuild [--db DB] [--max-bytes N] [--format text|json] ROOT", summary: "atomically rebuild the full index"},
-	{name: "update", usage: "code-index update [--db DB] [--max-bytes N] [--adopt] [--format text|json] ROOT", summary: "create or incrementally refresh the index"},
+	{name: "path", usage: "code-index path [--format text|json] [ROOT]", summary: "print the resolved database path"},
+	{name: "init", usage: "code-index init [--db DB] [--format text|json] [ROOT]", summary: "initialize an empty index database"},
+	{name: "rebuild", usage: "code-index rebuild [--db DB] [--max-bytes N] [--format text|json] [ROOT]", summary: "atomically rebuild the full index"},
+	{name: "update", usage: "code-index update [--db DB] [--max-bytes N] [--adopt] [--format text|json] [ROOT]", summary: "create or incrementally refresh the index"},
 	{name: "defs", usage: "code-index defs [--root ROOT|--db DB] [--kind KIND] [--language LANG] [--list] [--format text|json] [QUERY]", summary: "list or find symbol definitions"},
 	{name: "files", usage: "code-index files [--root ROOT|--db DB] [--language LANG] [--list] [--format text|json] [QUERY]", summary: "list or find indexed files"},
 	{name: "sql", usage: "code-index sql [--root ROOT|--db DB] [--format text|json] [SQL]", summary: "run read-only SQL"},
@@ -203,18 +202,21 @@ func cmdPath(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if fs.NArg() != 1 {
+	if fs.NArg() > 1 {
 		return errors.New(commandUsage("path"))
 	}
 	format, err := parseOutputFormat(*formatFlag)
 	if err != nil {
 		return err
 	}
-	root, err := filepath.Abs(fs.Arg(0))
+	rootOption := ""
+	if fs.NArg() == 1 {
+		rootOption = fs.Arg(0)
+	}
+	path, _, err := resolveDB("", rootOption)
 	if err != nil {
 		return err
 	}
-	path := defaultDBPath(root)
 	if format == outputFormatJSON {
 		return writeJSON(os.Stdout, struct {
 			Path string `json:"path"`

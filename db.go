@@ -82,20 +82,6 @@ func removeDBSidecars(db string) error {
 	return nil
 }
 
-func requiredDB(db, root string) string {
-	if db != "" {
-		return db
-	}
-	if root == "" {
-		root = "."
-	}
-	abs, err := filepath.Abs(root)
-	if err != nil {
-		return defaultDBPath(root)
-	}
-	return defaultDBPath(abs)
-}
-
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil

@@ -75,7 +75,10 @@ func cmdStatus(args []string) error {
 	if err != nil {
 		return err
 	}
-	db := requiredDB(*dbFlag, *root)
+	db, resolvedRoot, err := resolveDB(*dbFlag, *root)
+	if err != nil {
+		return err
+	}
 	dbExists := fileExists(db)
 	lockInfo, locked, err := readIndexLock(db)
 	if err != nil {
@@ -85,7 +88,7 @@ func cmdStatus(args []string) error {
 		return fmt.Errorf("index not found: %s; run init or rebuild first, or pass --db", db)
 	}
 	if format == outputFormatJSON {
-		return writeStatusJSON(db, *root, dbExists, lockInfo, locked)
+		return writeStatusJSON(db, resolvedRoot, dbExists, lockInfo, locked)
 	}
 	fmt.Println("key\tvalue")
 	fmt.Printf("db\t%s\n", db)
@@ -97,7 +100,7 @@ func cmdStatus(args []string) error {
 			return err
 		}
 		printMetaStatus(meta)
-		if err := printCurrentStatus(*root, meta); err != nil {
+		if err := printCurrentStatus(resolvedRoot, meta); err != nil {
 			return err
 		}
 	}
@@ -192,7 +195,11 @@ func collectCurrentStatus(root string, meta map[string]string) (*currentStatusRe
 	if status.dirty != "" {
 		result.dirty = boolPointer(status.dirty == boolText(true))
 	}
-	compatibility, err := checkUpdateCompatibility(meta, root, defaultBuildConfig(), hasFTS5())
+	config, err := resolveConfig(root)
+	if err != nil {
+		return nil, err
+	}
+	compatibility, err := checkUpdateCompatibility(meta, root, config.build, hasFTS5())
 	if err != nil {
 		return nil, err
 	}

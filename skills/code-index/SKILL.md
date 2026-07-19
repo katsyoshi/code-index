@@ -69,13 +69,13 @@ export CODE_INDEX_CACHE_DIR="${CODE_INDEX_CACHE_DIR:-/tmp/code-index}"
 5. Build or refresh the index before substantial search work. Prefer `update` for an existing index; it refreshes changed Git-tracked files and removes files no longer tracked by Git:
 
 ```bash
-"$TOOL" update --format json "$PWD"
+"$TOOL" update --format json
 ```
 
 If `update` reports that the index does not exist yet, run `rebuild` explicitly:
 
 ```bash
-"$TOOL" rebuild --format json "$PWD"
+"$TOOL" rebuild --format json
 ```
 
 If `update` reports incompatible schema, file source, hash, or indexing config settings, run `rebuild`. If it reports another checkout path or unknown Git history, run `rebuild` unless the user explicitly wants this DB to belong to the current checkout; only then use `update --adopt`.
@@ -83,7 +83,7 @@ If `update` reports incompatible schema, file source, hash, or indexing config s
 6. Check status when lock or freshness may matter:
 
 ```bash
-"$TOOL" status --root "$PWD" --format json
+"$TOOL" status --format json
 ```
 
 Use `update_compatible`, `update_requires_adopt`, `update_rebuild_required`, and `update_blocker` from `status` to decide whether to run normal `update`, ask before `update --adopt`, or run `rebuild`.
@@ -93,21 +93,21 @@ If `status` is unsupported, continue with query commands and rely on rebuild out
 7. Search definitions and files through the index:
 
 ```bash
-"$TOOL" defs --root "$PWD" --format json parse_config
-"$TOOL" files --root "$PWD" --format json config
+"$TOOL" defs --format json parse_config
+"$TOOL" files --format json config
 ```
 
 8. Run raw read-only SQL for precise lookup:
 
 ```bash
-"$TOOL" sql --root "$PWD" --format json \
+"$TOOL" sql --format json \
   "select path, line, kind, name, signature from symbols where name like '%parse%' order by path, line limit 50"
 ```
 
 9. Show source around indexed lines:
 
 ```bash
-"$TOOL" show --root "$PWD" --line 42 --format json lib/config.rb
+"$TOOL" show --line 42 --format json lib/config.rb
 ```
 
 10. Run `update` after editing tracked files that affect search results. Use `rebuild` after tool upgrades, schema changes, or option changes that should refresh every tracked file.
@@ -133,45 +133,45 @@ Common commands:
 "$TOOL" help --format json update
 
 # Print the default database path for a root.
-"$TOOL" path --format json "$PWD"
+"$TOOL" path --format json
 
 # Show build information for compatibility checks.
 "$TOOL" version --format json
 
 # Initialize an empty schema when explicitly needed.
-"$TOOL" init --format json "$PWD"
+"$TOOL" init --format json
 
 # Atomic full rebuild from Git-tracked files. Current CLI skips successfully if another operation holds the lock.
-"$TOOL" rebuild --format json "$PWD"
+"$TOOL" rebuild --format json
 
 # Incrementally refresh an existing index from Git-tracked files.
-"$TOOL" update --format json "$PWD"
+"$TOOL" update --format json
 
 # Adopt an index from another checkout path or Git history only when intentional.
-"$TOOL" update --adopt --format json "$PWD"
+"$TOOL" update --adopt --format json
 
 # Show lock state and metadata from the last successful update in the agent-oriented format.
-"$TOOL" status --root "$PWD" --format json
+"$TOOL" status --format json
 
 # Find symbols.
-"$TOOL" defs --root "$PWD" --list --format json
-"$TOOL" defs --root "$PWD" --format json UserRepository
+"$TOOL" defs --list --format json
+"$TOOL" defs --format json UserRepository
 
 # Find files by path.
-"$TOOL" files --root "$PWD" --list --format json
-"$TOOL" files --root "$PWD" --format json repository
+"$TOOL" files --list --format json
+"$TOOL" files --format json repository
 
 # Inspect the available tables and columns in the agent-oriented format.
-"$TOOL" schema --root "$PWD" --format json
+"$TOOL" schema --format json
 
 # Show index-wide counts and build metadata.
-"$TOOL" stats --root "$PWD" --format json
+"$TOOL" stats --format json
 
 # Show source from indexed lines.
-"$TOOL" show --root "$PWD" --line 42 --format json lib/user_repository.rb
+"$TOOL" show --line 42 --format json lib/user_repository.rb
 ```
 
-The default database lives under `CODE_INDEX_CACHE_DIR` when set. Otherwise it uses `$XDG_CACHE_HOME/code-index` or `~/.cache/code-index`, keyed by the repository root path. Pass `--db path/to/index.sqlite` when a stable or shared index is needed.
+Commands run inside a Git work tree discover its repository root automatically. The default database lives under `CODE_INDEX_CACHE_DIR` when set. Otherwise it uses `$XDG_CACHE_HOME/code-index` or `~/.cache/code-index`, keyed by the repository root path. A project `.code-index.toml` may override the database with a repository-relative `db`; pass `--db path/to/index.sqlite` for an explicit one-run override.
 
 ## References
 

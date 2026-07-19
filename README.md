@@ -73,6 +73,16 @@ Host-specific metadata can live under `skills/code-index/agents/`; agents that d
 
 ## Usage
 
+Run commands from anywhere inside a Git work tree to use its repository root automatically:
+
+```sh
+./code-index rebuild
+./code-index update
+./code-index status --format json
+```
+
+Passing a root remains supported when operating on another checkout.
+
 Update an existing index incrementally:
 
 ```sh
@@ -204,11 +214,28 @@ The JSON format emits one object with native counts and booleans. Unavailable me
 
 The default database is stored under `CODE_INDEX_CACHE_DIR` when set. Otherwise it uses `$XDG_CACHE_HOME/code-index` or `~/.cache/code-index`, keyed by the absolute repository path. Use `--db` to provide an explicit database path.
 
+Configuration is selected by taking the first existing file in this order:
+
+1. `REPOSITORY_ROOT/.code-index.toml`
+2. `$XDG_CONFIG_HOME/code-index/config.toml`, or `~/.config/code-index/config.toml` when `XDG_CONFIG_HOME` is unset
+3. `/etc/code-index/config.toml`
+
+Only that file is read. Missing fields use built-in defaults; values are not merged from less-specific files. Supported top-level fields are:
+
+```toml
+max_bytes = 1000000
+ignore_dirs = ["generated", "scratch"]
+db = ".code-index/index.sqlite"
+```
+
+`ignore_dirs` adds directory names to the built-in ignore list. `db` is allowed only in the project configuration, must be relative to the repository root, and must remain inside it. `--db` and `--max-bytes` override configured values for one run; `--ignore-dir` adds another ignored directory. Unknown fields and invalid values are errors.
+
 Print the default database path without creating it:
 
 ```sh
 ./code-index path /path/to/repo
 ./code-index path --format json /path/to/repo
+./code-index path
 ```
 
 The JSON format emits one object with a `path` field.
