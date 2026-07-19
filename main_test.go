@@ -93,7 +93,7 @@ func TestVersionCommand(t *testing.T) {
 	}
 	var result versionJSONResult
 	decodeRunJSON(t, []string{"version", "--format", "json"}, &result)
-	if result.SchemaVersion != 1 || result.FileSource != fileSource {
+	if result.SchemaVersion != 2 || result.FileSource != fileSource {
 		t.Fatalf("version JSON = %#v", result)
 	}
 	if result.Commit != nil && *result.Commit == "unknown" {
@@ -300,7 +300,7 @@ func TestStatsCommandJSONOutputUsesNativeTypesAndNulls(t *testing.T) {
 
 	var result statsJSONResult
 	decodeRunJSON(t, []string{"stats", "--db", db, "--format", "json"}, &result)
-	if result.Root == nil || *result.Root != root || result.SchemaVersion == nil || *result.SchemaVersion != 1 || result.FileSource == nil || *result.FileSource != fileSource {
+	if result.Root == nil || *result.Root != root || result.SchemaVersion == nil || *result.SchemaVersion != 2 || result.FileSource == nil || *result.FileSource != fileSource {
 		t.Fatalf("stats JSON metadata = %#v", result)
 	}
 	if result.Files != 0 || result.Symbols != 0 || result.Lines != 0 || result.CodeLines != 0 || result.CommentLines != 0 || result.BlankLines != 0 {
@@ -317,6 +317,37 @@ func TestStatsCommandJSONOutputUsesNativeTypesAndNulls(t *testing.T) {
 	}
 }
 
+func TestComponentsRecordCompletedBuildState(t *testing.T) {
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		t.Skip("sqlite3 command not found")
+	}
+	root := t.TempDir()
+	db := filepath.Join(t.TempDir(), "index.sqlite")
+	if err := createEmptyIndexDB(db, root, "init", false, defaultBuildConfig()); err != nil {
+		t.Fatal(err)
+	}
+	components, known, err := loadComponents(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !known || len(components) != 5 {
+		t.Fatalf("components = %#v, known = %t", components, known)
+	}
+	wantNames := []string{"files", "lines", "symbols", "metrics", "fts"}
+	for index, component := range components {
+		if component.Name != wantNames[index] {
+			t.Fatalf("component %d = %#v, want name %q", index, component, wantNames[index])
+		}
+		wantStatus := "ready"
+		if component.Name == "fts" {
+			wantStatus = "unavailable"
+		}
+		if component.Status != wantStatus || component.UpdatedAt == "" {
+			t.Fatalf("component %s = %#v, want status %q and timestamp", component.Name, component, wantStatus)
+		}
+	}
+}
+
 func TestSchemaCommandShowsUserTablesAndColumns(t *testing.T) {
 	if _, err := exec.LookPath("sqlite3"); err != nil {
 		t.Skip("sqlite3 command not found")
@@ -330,6 +361,7 @@ func TestSchemaCommandShowsUserTablesAndColumns(t *testing.T) {
 	out := captureRunOutput(t, []string{"schema", "--db", db})
 	for _, want := range []string{
 		"table_name\tordinal\tcolumn_name\ttype\tnullable\tkey",
+		"components\t1\tname\tTEXT\tno\tprimary(1)",
 		"files\t1\tid\tINTEGER\tno\tprimary(1)",
 		"lines\t2\tline\tINTEGER\tno\tprimary(2)",
 		"symbols\t6\tname\tTEXT\tno\t-",
@@ -885,7 +917,7 @@ func TestStatusJSONUsesNativeTypesAndNulls(t *testing.T) {
 		"db":                      db,
 		"exists":                  true,
 		"locked":                  false,
-		"schema_version":          float64(1),
+		"schema_version":          float64(2),
 		"config_max_bytes":        float64(defaultMaxBytes),
 		"fts5":                    hasFTS5(),
 		"current_vcs_dirty":       false,
@@ -904,6 +936,10 @@ func TestStatusJSONUsesNativeTypesAndNulls(t *testing.T) {
 	ignoreDirs, ok := result["config_ignore_dirs"].([]any)
 	if !ok || len(ignoreDirs) == 0 {
 		t.Fatalf("status JSON config_ignore_dirs = %#v, want non-empty array", result["config_ignore_dirs"])
+	}
+	components, ok := result["components"].([]any)
+	if !ok || len(components) != 5 {
+		t.Fatalf("status JSON components = %#v, want five components", result["components"])
 	}
 	if err := run([]string{"status", "--db", db, "--format", "yaml"}); err == nil || !strings.Contains(err.Error(), "unsupported output format") {
 		t.Fatalf("status with unsupported format error = %v", err)

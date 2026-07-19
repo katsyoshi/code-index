@@ -2,6 +2,11 @@ create table meta (
   key text primary key,
   value text not null
 );
+create table components (
+  name text primary key,
+  status text not null check (status in ('ready', 'disabled', 'unavailable')),
+  updated_at text not null
+);
 create table files (
   id integer primary key,
   path text not null unique,

@@ -86,7 +86,7 @@ If `update` reports incompatible schema, file source, hash, or indexing config s
 "$TOOL" status --format json
 ```
 
-Use `update_compatible`, `update_requires_adopt`, `update_rebuild_required`, and `update_blocker` from `status` to decide whether to run normal `update`, ask before `update --adopt`, or run `rebuild`.
+Use `components`, `update_compatible`, `update_requires_adopt`, `update_rebuild_required`, and `update_blocker` from `status` to confirm the completed index state and decide whether to run normal `update`, ask before `update --adopt`, or run `rebuild`.
 
 If `status` is unsupported, continue with query commands and rely on rebuild output.
 

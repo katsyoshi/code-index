@@ -17,7 +17,7 @@ import (
 	"time"
 )
 
-const schemaVersion = "1"
+const schemaVersion = "2"
 const contentHashAlgorithm = "sha256"
 const fileSource = "git-tracked"
 
@@ -178,6 +178,19 @@ func writeOperationMetaSQL(w io.Writer, root, operation string, fts bool, config
 			continue
 		}
 		writeSQL(w, "%s\n", formatEmbeddedSQL("meta_upsert.sql", quote(pair.key), quote(pair.value)))
+	}
+	componentStatuses := []metaPair{
+		{"files", "ready"},
+		{"lines", "ready"},
+		{"metrics", "ready"},
+		{"symbols", "ready"},
+		{"fts", "unavailable"},
+	}
+	if fts {
+		componentStatuses[len(componentStatuses)-1].value = "ready"
+	}
+	for _, component := range componentStatuses {
+		writeSQL(w, "%s\n", formatEmbeddedSQL("component_upsert.sql", quote(component.key), quote(component.value), quote(now)))
 	}
 }
 

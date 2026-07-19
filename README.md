@@ -287,13 +287,14 @@ The examples run in the background so Git commands do not wait for indexing. Dur
 
 If a lock file records a PID that is no longer running, build/update/query commands treat it as stale and remove it before continuing. `status` reports `lock_stale` for visibility without requiring a rebuild.
 
-`status` combines the lock file with database metadata. Lock fields describe a currently running operation; metadata such as `indexed_at`, `last_operation`, `vcs_head`, and `vcs_branch` describes the last successful update.
+`status` combines the lock file with database metadata. Lock fields describe a currently running operation; metadata such as `indexed_at`, `last_operation`, `vcs_head`, and `vcs_branch` describes the last successful update. The JSON result also includes `components`, with the completed `ready`, `disabled`, or `unavailable` state and update time for each index component.
 
 ## Schema
 
 Main tables:
 
 - `meta`: schema version, file source, hash algorithm, last successful index time, operation, and VCS metadata such as head, branch, tracked-file dirty state, and dirty snapshot hash
+- `components`: completed state and update time for the `files`, `lines`, `symbols`, `metrics`, and `fts` index components
 - `files`: repository-relative paths and file metadata
 - `symbols`: regex-extracted definitions such as functions, methods, classes, modules, interfaces, traits, and types
 - `lines`: indexed source lines
