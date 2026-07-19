@@ -40,7 +40,7 @@ type updateJSONResult struct {
 	FTS5          *bool   `json:"fts5"`
 }
 
-func cmdInit(args []string) error {
+func cmdInit(args []string) (resultErr error) {
 	flags := flag.NewFlagSet("init", flag.ExitOnError)
 	dbPath := flags.String("db", "", "database path")
 	formatFlag := flags.String("format", "text", "output format: text or json")
@@ -76,6 +76,8 @@ func cmdInit(args []string) error {
 			db = defaultDBPath(root)
 		}
 	}
+	recorder := beginBuildRun("init", db, root)
+	defer recorder.finish(&resultErr)
 	if err := ensureIndexDoesNotExist(db); err != nil {
 		return err
 	}
@@ -221,19 +223,22 @@ func (o buildOptions) config() buildConfig {
 	}
 }
 
-func runRebuild(args []string) error {
+func runRebuild(args []string) (resultErr error) {
 	options, err := parseBuildOptions("rebuild", args, false)
 	if err != nil {
 		return err
 	}
 	root := options.root
 	db := options.db
+	recorder := beginBuildRun("rebuild", db, root)
+	defer recorder.finish(&resultErr)
 	if err := os.MkdirAll(filepath.Dir(db), 0o755); err != nil {
 		return err
 	}
 	lock, err := acquireIndexLock(db, "rebuild", root)
 	if err != nil {
 		if isIndexLocked(err) {
+			recorder.skip()
 			printLockSkipped(db)
 			if options.format == outputFormatJSON {
 				return writeJSON(os.Stdout, skippedFullBuildResult("rebuild", db, root))
@@ -319,17 +324,20 @@ func runRebuild(args []string) error {
 	return nil
 }
 
-func runUpdate(args []string) error {
+func runUpdate(args []string) (resultErr error) {
 	options, err := parseBuildOptions("update", args, true)
 	if err != nil {
 		return err
 	}
 	root := options.root
 	db := options.db
+	recorder := beginBuildRun("update", db, root)
+	defer recorder.finish(&resultErr)
 	if !fileExists(db) {
 		if _, locked, err := readActiveIndexLock(db); err != nil {
 			return err
 		} else if locked {
+			recorder.skip()
 			printLockSkipped(db)
 			if options.format == outputFormatJSON {
 				return writeJSON(os.Stdout, skippedUpdateResult(db, root))
@@ -344,6 +352,7 @@ func runUpdate(args []string) error {
 	lock, err := acquireIndexLock(db, "update", root)
 	if err != nil {
 		if isIndexLocked(err) {
+			recorder.skip()
 			printLockSkipped(db)
 			if options.format == outputFormatJSON {
 				return writeJSON(os.Stdout, skippedUpdateResult(db, root))

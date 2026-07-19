@@ -42,6 +42,7 @@ var commands = []command{
 	{name: "stats", usage: "code-index stats [--root ROOT|--db DB] [--format text|json]", summary: "show index table counts"},
 	{name: "metrics", usage: "code-index metrics [--root ROOT|--db DB] [--language LANG] [--limit N] [--format text|json] [PATH_QUERY]", summary: "show indexed code metrics"},
 	{name: "status", usage: "code-index status [--root ROOT|--db DB] [--format text|json]", summary: "show index metadata, lock state, and freshness"},
+	{name: "logs", usage: "code-index logs [--root ROOT|--db DB] [--limit N] [--format text|json]", summary: "show build operation logs"},
 }
 
 func run(args []string) error {
@@ -86,6 +87,8 @@ func commandHandler(name string) func([]string) error {
 		return cmdMetrics
 	case "status":
 		return cmdStatus
+	case "logs":
+		return cmdLogs
 	default:
 		return nil
 	}

@@ -133,6 +133,15 @@ The JSON format is intended for agents and scripts. It emits one object, uses na
 
 It also reports whether `update` can safely proceed, whether `update --adopt` would be required, or whether `rebuild` is required.
 
+Show recent build operation logs:
+
+```sh
+./code-index logs
+./code-index logs --limit 50 --format json
+```
+
+`init`, `rebuild`, and `update` record `succeeded`, `failed`, and lock-related `skipped` runs after root and database resolution succeeds. Logs are stored outside the replaceable index DB in a SQLite sidecar named `<index-db>.logs.sqlite`, so a failed atomic rebuild can still be recorded. The newest 1,000 runs are retained. Logging failures are warnings and do not change the index operation result. The JSON result is an array ordered newest first; an absent sidecar returns `[]`.
+
 Show command help:
 
 ```sh

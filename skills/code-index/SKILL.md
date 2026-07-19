@@ -153,6 +153,9 @@ Common commands:
 # Show lock state and metadata from the last successful update in the agent-oriented format.
 "$TOOL" status --format json
 
+# Show recent successful, failed, and skipped build runs.
+"$TOOL" logs --format json
+
 # Find symbols.
 "$TOOL" defs --list --format json
 "$TOOL" defs --format json UserRepository
@@ -172,6 +175,8 @@ Common commands:
 ```
 
 Commands run inside a Git work tree discover its repository root automatically. The default database lives under `CODE_INDEX_CACHE_DIR` when set. Otherwise it uses `$XDG_CACHE_HOME/code-index` or `~/.cache/code-index`, keyed by the repository root path. A project `.code-index.toml` may override the database with a repository-relative `db`; pass `--db path/to/index.sqlite` for an explicit one-run override.
+
+Use `logs --format json` when diagnosing a failed or skipped `init`, `rebuild`, or `update`. Operation logs live in a separate `<index-db>.logs.sqlite` sidecar and therefore survive atomic replacement of the index DB.
 
 ## References
 
