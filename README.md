@@ -137,16 +137,22 @@ The JSON format returns the top-level usage and command metadata. Whole-program 
 Find symbol definitions:
 
 ```sh
+./code-index defs --root /path/to/repo --list --format json
 ./code-index defs --root /path/to/repo parse_config
 ./code-index defs --root /path/to/repo --format json parse_config
 ```
 
+Use `--list` without `QUERY` to list definitions ordered by path and source position. `--kind`, `--language`, and `--limit` apply to both listing and searching. Combining `--list` with `QUERY` is an error.
+
 Find files:
 
 ```sh
+./code-index files --root /path/to/repo --list --format json
 ./code-index files --root /path/to/repo config
 ./code-index files --root /path/to/repo --format json config
 ```
+
+Use `--list` without `QUERY` to list files that are actually present in the index, ordered by path. `--language` and `--limit` apply to both listing and searching. Combining `--list` with `QUERY` is an error.
 
 Run read-only SQL:
 

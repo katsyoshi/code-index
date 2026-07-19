@@ -154,9 +154,11 @@ Common commands:
 "$TOOL" status --root "$PWD" --format json
 
 # Find symbols.
+"$TOOL" defs --root "$PWD" --list --format json
 "$TOOL" defs --root "$PWD" --format json UserRepository
 
 # Find files by path.
+"$TOOL" files --root "$PWD" --list --format json
 "$TOOL" files --root "$PWD" --format json repository
 
 # Inspect the available tables and columns in the agent-oriented format.

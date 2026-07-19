@@ -278,11 +278,34 @@ func TestQueryCommandsJSONOutput(t *testing.T) {
 	if len(definitions) != 1 || definitions[0].Path != "main.go" || definitions[0].Line != 3 || definitions[0].Name != "main" || definitions[0].Language == nil || *definitions[0].Language != "go" {
 		t.Fatalf("defs JSON = %#v", definitions)
 	}
+	var listedDefinitions []defsJSONRow
+	decodeRunJSON(t, []string{"defs", "--db", db, "--list", "--language", "go", "--kind", "function", "--format", "json"}, &listedDefinitions)
+	if len(listedDefinitions) != 1 || listedDefinitions[0].Name != "main" {
+		t.Fatalf("defs --list JSON = %#v", listedDefinitions)
+	}
+	var noDefinitions []defsJSONRow
+	decodeRunJSON(t, []string{"defs", "--db", db, "--list", "--kind", "class", "--format", "json"}, &noDefinitions)
+	if noDefinitions == nil || len(noDefinitions) != 0 {
+		t.Fatalf("empty defs --list JSON = %#v, want []", noDefinitions)
+	}
+	defsText := captureRunOutput(t, []string{"defs", "--db", db, "--list"})
+	if !strings.Contains(defsText, "path\tline\tkind\tname\tlanguage\tsignature") || !strings.Contains(defsText, "main.go\t3\tfunction\tmain") {
+		t.Fatalf("defs --list text = %q", defsText)
+	}
 
 	var files []filesJSONRow
 	decodeRunJSON(t, []string{"files", "--db", db, "--format", "json", "main"}, &files)
 	if len(files) != 1 || files[0].Path != "main.go" || files[0].Size != int64(len(content)) || files[0].Language == nil || *files[0].Language != "go" {
 		t.Fatalf("files JSON = %#v", files)
+	}
+	var listedFiles []filesJSONRow
+	decodeRunJSON(t, []string{"files", "--db", db, "--list", "--language", "go", "--format", "json"}, &listedFiles)
+	if len(listedFiles) != 1 || listedFiles[0].Path != "main.go" {
+		t.Fatalf("files --list JSON = %#v", listedFiles)
+	}
+	filesText := captureRunOutput(t, []string{"files", "--db", db, "--list"})
+	if !strings.Contains(filesText, "path\tlanguage\tsize") || !strings.Contains(filesText, "main.go\tgo") {
+		t.Fatalf("files --list text = %q", filesText)
 	}
 	var noFiles []filesJSONRow
 	decodeRunJSON(t, []string{"files", "--db", db, "--format", "json", "missing"}, &noFiles)
@@ -316,6 +339,17 @@ func TestQueryCommandsJSONOutput(t *testing.T) {
 	for _, args := range invalidFormatArgs {
 		if err := run(args); err == nil || !strings.Contains(err.Error(), "unsupported output format") {
 			t.Fatalf("%s with unsupported format error = %v", args[0], err)
+		}
+	}
+	invalidListArgs := [][]string{
+		{"defs", "--db", db, "--list", "main"},
+		{"defs", "--db", db},
+		{"files", "--db", db, "--list", "main"},
+		{"files", "--db", db},
+	}
+	for _, args := range invalidListArgs {
+		if err := run(args); err == nil {
+			t.Fatalf("%s with invalid list/query arguments succeeded", args[0])
 		}
 	}
 }

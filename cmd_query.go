@@ -114,26 +114,36 @@ func cmdDefs(args []string) error {
 	kind := fs.String("kind", "", "symbol kind filter")
 	language := fs.String("language", "", "language filter")
 	limit := fs.Int("limit", 50, "maximum rows")
+	list := fs.Bool("list", false, "list definitions without a query")
 	formatFlag := fs.String("format", "text", "output format: text or json")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if fs.NArg() != 1 {
+	if (*list && fs.NArg() != 0) || (!*list && fs.NArg() != 1) {
 		return errors.New(commandUsage("defs"))
 	}
 	format, err := parseOutputFormat(*formatFlag)
 	if err != nil {
 		return err
 	}
-	query := fs.Arg(0)
-	where := "(name = " + quote(query) + " collate nocase or name like " + quote(query+"%") + " collate nocase or signature like " + quote("%"+query+"%") + " collate nocase or path like " + quote("%"+query+"%") + " collate nocase)"
+	where := "1 = 1"
+	if !*list {
+		query := fs.Arg(0)
+		where = "(name = " + quote(query) + " collate nocase or name like " + quote(query+"%") + " collate nocase or signature like " + quote("%"+query+"%") + " collate nocase or path like " + quote("%"+query+"%") + " collate nocase)"
+	}
 	if *kind != "" {
 		where += " and kind = " + quote(*kind)
 	}
 	if *language != "" {
 		where += " and language = " + quote(*language)
 	}
-	sql := formatEmbeddedSQL("defs.sql", where, quote(query), quote(query+"%"), *limit)
+	var sql string
+	if *list {
+		sql = formatEmbeddedSQL("defs_list.sql", where, *limit)
+	} else {
+		query := fs.Arg(0)
+		sql = formatEmbeddedSQL("defs.sql", where, quote(query), quote(query+"%"), *limit)
+	}
 	dbPath := requiredDB(*db, *root)
 	if format == outputFormatText {
 		return runSQLitePrint(dbPath, sql)
@@ -151,19 +161,23 @@ func cmdFiles(args []string) error {
 	db := fs.String("db", "", "database path")
 	language := fs.String("language", "", "language filter")
 	limit := fs.Int("limit", 100, "maximum rows")
+	list := fs.Bool("list", false, "list indexed files without a query")
 	formatFlag := fs.String("format", "text", "output format: text or json")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if fs.NArg() != 1 {
+	if (*list && fs.NArg() != 0) || (!*list && fs.NArg() != 1) {
 		return errors.New(commandUsage("files"))
 	}
 	format, err := parseOutputFormat(*formatFlag)
 	if err != nil {
 		return err
 	}
-	query := fs.Arg(0)
-	where := "path like " + quote("%"+query+"%") + " collate nocase"
+	where := "1 = 1"
+	if !*list {
+		query := fs.Arg(0)
+		where = "path like " + quote("%"+query+"%") + " collate nocase"
+	}
 	if *language != "" {
 		where += " and language = " + quote(*language)
 	}
