@@ -17,6 +17,7 @@ type Symbol struct {
 	Kind      string
 	Name      string
 	Line      int
+	EndLine   int
 	Column    int
 	Signature string
 	Context   string
@@ -54,6 +55,7 @@ var symbolPatterns = map[string][]symbolSpec{
 		spec(`^\s*type\s+([A-Za-z_]\w*)\s+(?:struct|interface)\b`, "type"),
 	},
 	"rust": {
+		spec(`^\s*(?:pub(?:\([^)]*\))?\s+)?macro_rules!\s+([A-Za-z_]\w*)\b`, "macro"),
 		spec(`^\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+([A-Za-z_]\w*)\s*[<(]`, "function"),
 		spec(`^\s*(?:pub(?:\([^)]*\))?\s+)?struct\s+([A-Za-z_]\w*)\b`, "type"),
 		spec(`^\s*(?:pub(?:\([^)]*\))?\s+)?enum\s+([A-Za-z_]\w*)\b`, "enum"),
@@ -82,6 +84,7 @@ var symbolPatterns = map[string][]symbolSpec{
 	},
 	"elixir": {
 		spec(`^\s*defmodule\s+([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\s+do\b`, "module"),
+		spec(`^\s*defmacrop?\s+([A-Za-z_]\w*[!?]?)\b`, "macro"),
 		spec(`^\s*defp?\s+([A-Za-z_]\w*[!?]?)\b`, "function"),
 	},
 	"lua": {
@@ -94,7 +97,7 @@ var symbolPatterns = map[string][]symbolSpec{
 	},
 	"elisp": {
 		spec(`^\s*\((?:cl-)?defun\s+([-A-Za-z0-9_+*/!?<>=]+)\b`, "function"),
-		spec(`^\s*\(defmacro\s+([-A-Za-z0-9_+*/!?<>=]+)\b`, "function"),
+		spec(`^\s*\(defmacro\s+([-A-Za-z0-9_+*/!?<>=]+)\b`, "macro"),
 		spec(`^\s*\(def(?:var|custom|const)\s+([-A-Za-z0-9_+*/!?<>=]+)\b`, "constant"),
 	},
 	"scheme": {
@@ -102,12 +105,15 @@ var symbolPatterns = map[string][]symbolSpec{
 	},
 	"clojure": {
 		spec(`^\s*\(defn-?\s+([-A-Za-z0-9_+*/!?<>=]+)\b`, "function"),
+		spec(`^\s*\(defmacro\s+([-A-Za-z0-9_+*/!?<>=]+)\b`, "macro"),
 		spec(`^\s*\(def(?:macro|record|protocol|multi)?\s+([-A-Za-z0-9_+*/!?<>=]+)\b`, "constant"),
 	},
 	"c": {
+		spec(`^\s*#\s*define\s+([A-Za-z_]\w*)\b`, "macro"),
 		spec(`^\s*(?:[A-Za-z_][\w\s*]+)\s+([A-Za-z_]\w*)\s*\([^;{}]*\)\s*(?:\{|$)`, "function"),
 	},
 	"cpp": {
+		spec(`^\s*#\s*define\s+([A-Za-z_]\w*)\b`, "macro"),
 		spec(`^\s*(?:template\s*<[^>]+>\s*)?(?:[\w:<>,~*&\s]+)\s+([A-Za-z_~]\w*)\s*\([^;{}]*\)\s*(?:const\s*)?(?:noexcept\s*)?(?:->\s*[^{]+)?\s*(?:\{|$)`, "function"),
 		spec(`^\s*(?:class|struct)\s+([A-Za-z_]\w*)\b`, "type"),
 	},
@@ -180,6 +186,7 @@ func buildSymbol(path, language, kind, name string, line, column int, signature 
 		Kind:      kind,
 		Name:      name,
 		Line:      line,
+		EndLine:   line,
 		Column:    column,
 		Signature: truncate(strings.TrimSpace(signature), 500),
 		Context:   symbolContext(lines, line),

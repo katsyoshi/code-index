@@ -57,8 +57,10 @@ as identifier characters so a partial identifier is not reported as an exact
 match.
 
 Lines containing an exact matching symbol definition are excluded from
-reference candidates. Comments and string literals may be returned because
-the command reports lexical candidates rather than resolved references.
+reference candidates. Comments and string literals remain searchable and are
+returned when they contain the requested identifier. This is intentional: the
+command reports lexical candidates, and documentation or examples can be useful
+navigation results even when they are not executable references.
 
 Multiple definitions with the same name are not disambiguated. All matching
 definitions and all lexical candidates are returned subject to filters and the
@@ -219,7 +221,8 @@ array means all kinds; it is distinct from an unknown or unavailable value.
 - Defining one cross-language schema for language-specific metaprogramming
   operations
 - Inferring a reference from names such as `fileList` when `List` is absent
-- Excluding every comment or string literal
+- Classifying comments or string literals separately from other lexical
+  candidates
 - Replacing a language server
 
 ## Implementation questions

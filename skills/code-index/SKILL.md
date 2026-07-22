@@ -32,7 +32,7 @@ The `version` output identifies the binary by build commit when available. Treat
 Read the `Design` section in the repository `README.md` as the source of truth for project direction. In this skill, apply that direction as an operating rule: use `code-index` to reduce how much source enters the LLM context.
 
 - Query SQLite/FTS before opening files broadly.
-- Prefer a few targeted `show`, `outline`, `defs`, `files`, `metrics`, or read-only SQL results over loading whole directories.
+- Prefer a few targeted `show`, `outline`, `defs`, `refs`, `files`, `metrics`, or read-only SQL results over loading whole directories.
 - Treat indexed matches as navigation candidates and open source before making behavioral claims.
 
 ## Workflow
@@ -90,10 +90,11 @@ Use `components`, `update_compatible`, `update_requires_adopt`, `update_rebuild_
 
 If `status` is unsupported, continue with query commands and rely on rebuild output.
 
-7. Search definitions, file outlines, and files through the index:
+7. Search definitions, references, file outlines, and files through the index:
 
 ```bash
 "$TOOL" defs --format json parse_config
+"$TOOL" refs --format json parse_config
 "$TOOL" outline --format json path/to/file.go
 "$TOOL" files --format json config
 ```
@@ -164,6 +165,10 @@ Common commands:
 # Show symbols in one file.
 "$TOOL" outline --format json lib/user_repository.rb
 
+# Find likely symbol references.
+"$TOOL" refs --format json UserRepository
+"$TOOL" refs --kind class --format json UserRepository
+
 # Find files by path.
 "$TOOL" files --list --format json
 "$TOOL" files --format json repository
@@ -184,4 +189,4 @@ Use `logs --format json` when diagnosing a failed or skipped `init`, `rebuild`, 
 
 ## References
 
-Read `references/query-patterns.md` when raw SQL is needed, when the built-in `defs` or `files` commands are not enough, or when adapting this workflow to another code index.
+Read `references/query-patterns.md` when raw SQL is needed, when the built-in `defs`, `refs`, or `files` commands are not enough, or when adapting this workflow to another code index. `refs --format json` returns one object with `query`, `definitions`, and `candidates`; candidate rows include lexical `scope` when symbol ranges are available.

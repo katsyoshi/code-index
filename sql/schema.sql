@@ -24,6 +24,7 @@ create table symbols (
   kind text not null,
   name text not null,
   line integer not null,
+  end_line integer not null,
   column integer not null,
   signature text not null,
   context text not null

@@ -77,7 +77,7 @@ func parseRubyPrismDump(path, language string, sourceLines []string, dump string
 	var out []Symbol
 	dumpLines := strings.Split(dump, "\n")
 	for i, line := range dumpLines {
-		node, startLine, startColumn, ok := rubyDumpNode(line)
+		node, startLine, startColumn, endLine, ok := rubyDumpNode(line)
 		if !ok {
 			continue
 		}
@@ -85,19 +85,25 @@ func parseRubyPrismDump(path, language string, sourceLines []string, dump string
 		case "Module":
 			name, column := rubyClassOrModuleName(sourceLines, startLine, startColumn, "module")
 			if name != "" {
-				out = append(out, buildSymbol(path, language, "module", name, startLine, column, sourceLine(sourceLines, startLine), sourceLines))
+				symbol := buildSymbol(path, language, "module", name, startLine, column, sourceLine(sourceLines, startLine), sourceLines)
+				symbol.EndLine = endLine
+				out = append(out, symbol)
 			}
 		case "Class":
 			name, column := rubyClassOrModuleName(sourceLines, startLine, startColumn, "class")
 			if name != "" {
-				out = append(out, buildSymbol(path, language, "class", name, startLine, column, sourceLine(sourceLines, startLine), sourceLines))
+				symbol := buildSymbol(path, language, "class", name, startLine, column, sourceLine(sourceLines, startLine), sourceLines)
+				symbol.EndLine = endLine
+				out = append(out, symbol)
 			}
 		case "Def":
 			if sym, ok := rubyDefSymbol(path, language, sourceLines, dumpLines, i); ok {
+				sym.EndLine = endLine
 				out = append(out, sym)
 			}
 		case "ConstantWrite":
 			if sym, ok := rubyConstantSymbol(path, language, sourceLines, dumpLines, i); ok {
+				sym.EndLine = endLine
 				out = append(out, sym)
 			}
 		}
@@ -105,20 +111,24 @@ func parseRubyPrismDump(path, language string, sourceLines []string, dump string
 	return out, true
 }
 
-func rubyDumpNode(line string) (string, int, int, bool) {
+func rubyDumpNode(line string) (string, int, int, int, bool) {
 	match := rubyPrismNodeRE.FindStringSubmatch(line)
 	if match == nil {
-		return "", 0, 0, false
+		return "", 0, 0, 0, false
 	}
 	startLine, err := strconv.Atoi(match[2])
 	if err != nil {
-		return "", 0, 0, false
+		return "", 0, 0, 0, false
 	}
 	startColumn, err := strconv.Atoi(match[3])
 	if err != nil {
-		return "", 0, 0, false
+		return "", 0, 0, 0, false
 	}
-	return match[1], startLine, startColumn, true
+	endLine, err := strconv.Atoi(match[4])
+	if err != nil {
+		return "", 0, 0, 0, false
+	}
+	return match[1], startLine, startColumn, endLine, true
 }
 
 func parseRubyParseYDump(path, language string, sourceLines []string, dump string) ([]Symbol, bool) {
@@ -128,7 +138,7 @@ func parseRubyParseYDump(path, language string, sourceLines []string, dump strin
 	var out []Symbol
 	dumpLines := strings.Split(dump, "\n")
 	for i, line := range dumpLines {
-		node, startLine, startColumn, ok := rubyParseYNode(line)
+		node, startLine, startColumn, endLine, ok := rubyParseYNode(line)
 		if !ok {
 			continue
 		}
@@ -136,19 +146,25 @@ func parseRubyParseYDump(path, language string, sourceLines []string, dump strin
 		case "MODULE":
 			name, column := rubyClassOrModuleName(sourceLines, startLine, startColumn, "module")
 			if name != "" {
-				out = append(out, buildSymbol(path, language, "module", name, startLine, column, sourceLine(sourceLines, startLine), sourceLines))
+				symbol := buildSymbol(path, language, "module", name, startLine, column, sourceLine(sourceLines, startLine), sourceLines)
+				symbol.EndLine = endLine
+				out = append(out, symbol)
 			}
 		case "CLASS":
 			name, column := rubyClassOrModuleName(sourceLines, startLine, startColumn, "class")
 			if name != "" {
-				out = append(out, buildSymbol(path, language, "class", name, startLine, column, sourceLine(sourceLines, startLine), sourceLines))
+				symbol := buildSymbol(path, language, "class", name, startLine, column, sourceLine(sourceLines, startLine), sourceLines)
+				symbol.EndLine = endLine
+				out = append(out, symbol)
 			}
 		case "DEFN", "DEFS":
 			if sym, ok := rubyParseYMethodSymbol(path, language, sourceLines, dumpLines, i, startLine, startColumn, node == "DEFS"); ok {
+				sym.EndLine = endLine
 				out = append(out, sym)
 			}
 		case "CDECL":
 			if sym, ok := rubyParseYConstantSymbol(path, language, sourceLines, dumpLines, i, startLine, startColumn); ok {
+				sym.EndLine = endLine
 				out = append(out, sym)
 			}
 		}
@@ -156,20 +172,24 @@ func parseRubyParseYDump(path, language string, sourceLines []string, dump strin
 	return out, true
 }
 
-func rubyParseYNode(line string) (string, int, int, bool) {
+func rubyParseYNode(line string) (string, int, int, int, bool) {
 	match := rubyParseYNodeRE.FindStringSubmatch(line)
 	if match == nil {
-		return "", 0, 0, false
+		return "", 0, 0, 0, false
 	}
 	startLine, err := strconv.Atoi(match[2])
 	if err != nil {
-		return "", 0, 0, false
+		return "", 0, 0, 0, false
 	}
 	startColumn, err := strconv.Atoi(match[3])
 	if err != nil {
-		return "", 0, 0, false
+		return "", 0, 0, 0, false
 	}
-	return match[1], startLine, startColumn, true
+	endLine, err := strconv.Atoi(match[4])
+	if err != nil {
+		return "", 0, 0, 0, false
+	}
+	return match[1], startLine, startColumn, endLine, true
 }
 
 func rubyParseYMethodSymbol(path, language string, sourceLines, dumpLines []string, nodeLine, startLine, startColumn int, hasReceiver bool) (Symbol, bool) {

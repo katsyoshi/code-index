@@ -24,6 +24,9 @@ a language server or full code-intelligence system.
 - Keep dynamic SQL concerns in Go when values, filters, limits, or feature
   flags are assembled at runtime. Quote values explicitly with the existing
   helpers.
+- Before implementing a new CLI command or a materially new output contract,
+  add its interface design under `docs/DESIGNS/` so behavior and non-goals can
+  be reviewed independently from the implementation.
 - `rebuild` is the atomic full rebuild path. `update` is the incremental
   refresh path. Preserve that division.
 - Indexing should continue to use Git-tracked files only unless a task

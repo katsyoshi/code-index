@@ -27,7 +27,7 @@ func TestStatsCommandJSONOutputUsesNativeTypesAndNulls(t *testing.T) {
 
 	var result statsJSONResult
 	decodeRunJSON(t, []string{"stats", "--db", db, "--format", "json"}, &result)
-	if result.Root == nil || *result.Root != root || result.SchemaVersion == nil || *result.SchemaVersion != 2 || result.FileSource == nil || *result.FileSource != fileSource {
+	if result.Root == nil || *result.Root != root || result.SchemaVersion == nil || *result.SchemaVersion != 3 || result.FileSource == nil || *result.FileSource != fileSource {
 		t.Fatalf("stats JSON metadata = %#v", result)
 	}
 	if result.Files != 0 || result.Symbols != 0 || result.Lines != 0 || result.CodeLines != 0 || result.CommentLines != 0 || result.BlankLines != 0 {
@@ -92,6 +92,7 @@ func TestSchemaCommandShowsUserTablesAndColumns(t *testing.T) {
 		"files\t1\tid\tINTEGER\tno\tprimary(1)",
 		"lines\t2\tline\tINTEGER\tno\tprimary(2)",
 		"symbols\t6\tname\tTEXT\tno\t-",
+		"symbols\t8\tend_line\tINTEGER\tno\t-",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("schema output = %q, want %q", out, want)
@@ -148,7 +149,7 @@ func TestQueryCommandsJSONOutput(t *testing.T) {
 		t.Skip("git command not found")
 	}
 	root := t.TempDir()
-	content := "package main\n\nfunc main() {\n\tprintln(\"hello\")\n}\n"
+	content := "package main\n\n// RunTask documents the function.\nfunc main() {\n\tRunTask()\n\tfileRunTask := 1\n\t_ = fileRunTask\n}\n\nfunc RunTask() {}\n"
 	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -160,12 +161,12 @@ func TestQueryCommandsJSONOutput(t *testing.T) {
 
 	var definitions []defsJSONRow
 	decodeRunJSON(t, []string{"defs", "--db", db, "--format", "json", "main"}, &definitions)
-	if len(definitions) != 1 || definitions[0].Path != "main.go" || definitions[0].Line != 3 || definitions[0].Name != "main" || definitions[0].Language == nil || *definitions[0].Language != "go" {
+	if len(definitions) != 2 || definitions[0].Path != "main.go" || definitions[0].Line != 4 || definitions[0].Name != "main" || definitions[0].Language == nil || *definitions[0].Language != "go" {
 		t.Fatalf("defs JSON = %#v", definitions)
 	}
 	var listedDefinitions []defsJSONRow
 	decodeRunJSON(t, []string{"defs", "--db", db, "--list", "--language", "go", "--kind", "function", "--format", "json"}, &listedDefinitions)
-	if len(listedDefinitions) != 1 || listedDefinitions[0].Name != "main" {
+	if len(listedDefinitions) != 2 || listedDefinitions[0].Name != "main" || listedDefinitions[1].Name != "RunTask" {
 		t.Fatalf("defs --list JSON = %#v", listedDefinitions)
 	}
 	var noDefinitions []defsJSONRow
@@ -174,23 +175,57 @@ func TestQueryCommandsJSONOutput(t *testing.T) {
 		t.Fatalf("empty defs --list JSON = %#v, want []", noDefinitions)
 	}
 	defsText := captureRunOutput(t, []string{"defs", "--db", db, "--list"})
-	if !strings.Contains(defsText, "path\tline\tkind\tname\tlanguage\tsignature") || !strings.Contains(defsText, "main.go\t3\tfunction\tmain") {
+	if !strings.Contains(defsText, "path\tline\tkind\tname\tlanguage\tsignature") || !strings.Contains(defsText, "main.go\t4\tfunction\tmain") {
 		t.Fatalf("defs --list text = %q", defsText)
 	}
 
 	var outline []defsJSONRow
 	decodeRunJSON(t, []string{"outline", "--db", db, "--format", "json", "main.go"}, &outline)
-	if len(outline) != 1 || outline[0].Path != "main.go" || outline[0].Line != 3 || outline[0].Name != "main" {
+	if len(outline) != 2 || outline[0].Path != "main.go" || outline[0].Line != 4 || outline[0].Name != "main" || outline[1].Name != "RunTask" {
 		t.Fatalf("outline JSON = %#v", outline)
 	}
 	outlineText := captureRunOutput(t, []string{"outline", "--db", db, "main.go"})
-	if !strings.Contains(outlineText, "path\tline\tkind\tname\tlanguage\tsignature") || !strings.Contains(outlineText, "main.go\t3\tfunction\tmain") {
+	if !strings.Contains(outlineText, "path\tline\tkind\tname\tlanguage\tsignature") || !strings.Contains(outlineText, "main.go\t4\tfunction\tmain") {
 		t.Fatalf("outline text = %q", outlineText)
 	}
 	var missingOutline []defsJSONRow
 	decodeRunJSON(t, []string{"outline", "--db", db, "--format", "json", "missing.go"}, &missingOutline)
 	if missingOutline == nil || len(missingOutline) != 0 {
 		t.Fatalf("missing outline JSON = %#v, want []", missingOutline)
+	}
+
+	var references refsJSONResult
+	decodeRunJSON(t, []string{"refs", "--db", db, "--kind", "function", "--kind", "class", "--language", "go", "--format", "json", "RunTask"}, &references)
+	if references.Query.Name != "RunTask" || !references.Query.CaseSensitive || len(references.Query.Kinds) != 2 || references.Query.Kinds[0] != "class" || references.Query.Kinds[1] != "function" {
+		t.Fatalf("refs query = %#v", references.Query)
+	}
+	if len(references.Definitions) != 1 || references.Definitions[0].Name != "RunTask" || references.Definitions[0].Line != 10 {
+		t.Fatalf("refs definitions = %#v", references.Definitions)
+	}
+	if len(references.Candidates) != 2 || references.Candidates[0].Line != 3 || references.Candidates[1].Line != 5 || references.Candidates[1].Text != "\tRunTask()" || references.Candidates[1].Language == nil || *references.Candidates[1].Language != "go" {
+		t.Fatalf("refs candidates = %#v", references.Candidates)
+	}
+	if len(references.Candidates[0].Scope) != 0 || len(references.Candidates[1].Scope) != 1 || references.Candidates[1].Scope[0].Kind != "function" || references.Candidates[1].Scope[0].Name != "main" {
+		t.Fatalf("refs scopes = %#v", references.Candidates)
+	}
+	refsText := captureRunOutput(t, []string{"refs", "--db", db, "RunTask"})
+	if !strings.Contains(refsText, "query: RunTask (kinds: all, case-sensitive)") || !strings.Contains(refsText, "main.go:10  function RunTask") || !strings.Contains(refsText, "[function main]") || !strings.Contains(refsText, "5  RunTask()") {
+		t.Fatalf("refs text = %q", refsText)
+	}
+	var noReferences refsJSONResult
+	decodeRunJSON(t, []string{"refs", "--db", db, "--format", "json", "missing"}, &noReferences)
+	if noReferences.Definitions == nil || noReferences.Candidates == nil || len(noReferences.Definitions) != 0 || len(noReferences.Candidates) != 0 {
+		t.Fatalf("empty refs JSON = %#v, want empty arrays", noReferences)
+	}
+	var wrongCase refsJSONResult
+	decodeRunJSON(t, []string{"refs", "--db", db, "--format", "json", "runtask"}, &wrongCase)
+	if len(wrongCase.Definitions) != 0 || len(wrongCase.Candidates) != 0 {
+		t.Fatalf("case-sensitive refs JSON = %#v, want no matches", wrongCase)
+	}
+	var ignoredCase refsJSONResult
+	decodeRunJSON(t, []string{"refs", "--db", db, "--ignore-case", "--format", "json", "runtask"}, &ignoredCase)
+	if ignoredCase.Query.CaseSensitive || len(ignoredCase.Definitions) != 1 || len(ignoredCase.Candidates) != 2 {
+		t.Fatalf("ignore-case refs JSON = %#v", ignoredCase)
 	}
 
 	var files []filesJSONRow
@@ -214,25 +249,26 @@ func TestQueryCommandsJSONOutput(t *testing.T) {
 	}
 
 	var shown []showJSONRow
-	decodeRunJSON(t, []string{"show", "--db", db, "--line", "4", "--context", "0", "--format", "json", "main.go"}, &shown)
-	if len(shown) != 1 || shown[0].Path != "main.go" || shown[0].Line != 4 || shown[0].Text != "\tprintln(\"hello\")" {
+	decodeRunJSON(t, []string{"show", "--db", db, "--line", "5", "--context", "0", "--format", "json", "main.go"}, &shown)
+	if len(shown) != 1 || shown[0].Path != "main.go" || shown[0].Line != 5 || shown[0].Text != "\tRunTask()" {
 		t.Fatalf("show JSON = %#v", shown)
 	}
 
 	var summary []metricsSummaryJSONRow
 	decodeRunJSON(t, []string{"metrics", "--db", db, "--format", "json"}, &summary)
-	if len(summary) != 1 || summary[0].Language != "go" || summary[0].Files != 1 || summary[0].Lines != 5 || summary[0].Symbols != 1 {
+	if len(summary) != 1 || summary[0].Language != "go" || summary[0].Files != 1 || summary[0].Lines != 10 || summary[0].Symbols != 2 {
 		t.Fatalf("metrics summary JSON = %#v", summary)
 	}
 	var fileMetrics []metricsFileJSONRow
 	decodeRunJSON(t, []string{"metrics", "--db", db, "--format", "json", "main"}, &fileMetrics)
-	if len(fileMetrics) != 1 || fileMetrics[0].Path != "main.go" || fileMetrics[0].Lines != 5 || fileMetrics[0].Symbols != 1 {
+	if len(fileMetrics) != 1 || fileMetrics[0].Path != "main.go" || fileMetrics[0].Lines != 10 || fileMetrics[0].Symbols != 2 {
 		t.Fatalf("metrics files JSON = %#v", fileMetrics)
 	}
 
 	invalidFormatArgs := [][]string{
 		{"defs", "--db", db, "--format", "yaml", "main"},
 		{"outline", "--db", db, "--format", "yaml", "main.go"},
+		{"refs", "--db", db, "--format", "yaml", "main"},
 		{"files", "--db", db, "--format", "yaml", "main"},
 		{"show", "--db", db, "--line", "1", "--format", "yaml", "main.go"},
 		{"metrics", "--db", db, "--format", "yaml"},
@@ -244,6 +280,15 @@ func TestQueryCommandsJSONOutput(t *testing.T) {
 	}
 	if err := run([]string{"outline", "--db", db}); err == nil {
 		t.Fatal("outline without path succeeded, want failure")
+	}
+	if err := run([]string{"refs", "--db", db}); err == nil {
+		t.Fatal("refs without name succeeded, want failure")
+	}
+	if err := run([]string{"refs", "--db", db, ""}); err == nil {
+		t.Fatal("refs with empty name succeeded, want failure")
+	}
+	if err := run([]string{"refs", "--db", db, "--limit", "0", "main"}); err == nil {
+		t.Fatal("refs with non-positive limit succeeded, want failure")
 	}
 	invalidListArgs := [][]string{
 		{"defs", "--db", db, "--list", "main"},

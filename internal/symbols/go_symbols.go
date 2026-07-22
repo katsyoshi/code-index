@@ -28,7 +28,9 @@ func (goSymbolExtractor) extract(path, language string, lines []string) ([]Symbo
 			if decl.Recv != nil {
 				kind = "method"
 			}
-			out = append(out, goSymbol(path, language, kind, decl.Name.Name, decl.Name.Pos(), decl.Pos(), decl.Type.End(), fileset, lines))
+			symbol := goSymbol(path, language, kind, decl.Name.Name, decl.Name.Pos(), decl.Pos(), decl.Type.End(), fileset, lines)
+			symbol.EndLine = fileset.Position(decl.End()).Line
+			out = append(out, symbol)
 		case *ast.GenDecl:
 			out = append(out, goGenDeclSymbols(path, language, decl, fileset, lines)...)
 		}
@@ -41,7 +43,9 @@ func goGenDeclSymbols(path, language string, decl *ast.GenDecl, fileset *token.F
 	for _, spec := range decl.Specs {
 		switch spec := spec.(type) {
 		case *ast.TypeSpec:
-			out = append(out, goSymbol(path, language, "type", spec.Name.Name, spec.Name.Pos(), spec.Pos(), spec.End(), fileset, lines))
+			symbol := goSymbol(path, language, "type", spec.Name.Name, spec.Name.Pos(), spec.Pos(), spec.End(), fileset, lines)
+			symbol.EndLine = fileset.Position(spec.End()).Line
+			out = append(out, symbol)
 		case *ast.ValueSpec:
 			kind := "variable"
 			if decl.Tok == token.CONST {
@@ -51,7 +55,9 @@ func goGenDeclSymbols(path, language string, decl *ast.GenDecl, fileset *token.F
 				if name.Name == "_" {
 					continue
 				}
-				out = append(out, goSymbol(path, language, kind, name.Name, name.Pos(), spec.Pos(), spec.End(), fileset, lines))
+				symbol := goSymbol(path, language, kind, name.Name, name.Pos(), spec.Pos(), spec.End(), fileset, lines)
+				symbol.EndLine = fileset.Position(spec.End()).Line
+				out = append(out, symbol)
 			}
 		}
 	}

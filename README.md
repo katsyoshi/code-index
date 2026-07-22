@@ -181,6 +181,24 @@ Show the symbols in one indexed file:
 
 `outline` returns symbols in source order. It prefers an exact repository-relative path and also accepts a path suffix such as `file.go`.
 
+Find likely symbol references:
+
+```sh
+./code-index refs --root /path/to/repo parse_config
+./code-index refs --root /path/to/repo --kind function --kind method parse_config
+./code-index refs --root /path/to/repo --language go --ignore-case --format json parseConfig
+```
+
+The default text output is intended for interactive CLI use. `--format json`
+is available for agents and scripts. `refs` matches complete identifiers with
+case sensitivity by default; `--ignore-case` changes only case handling and
+does not enable substring matches. Exact definition lines are excluded while
+comments and strings remain searchable. `--kind` may be repeated to filter the
+definitions reported with the candidates, and `--limit` controls candidate
+count. Results include enclosing lexical scope when the indexer knows symbol
+ranges, but remain candidates rather than a resolved call or reference graph.
+See [`docs/DESIGNS/refs.md`](docs/DESIGNS/refs.md) for the full contract.
+
 Find files:
 
 ```sh
@@ -228,7 +246,7 @@ Show indexed code metrics:
 ./code-index metrics --root /path/to/repo --format json
 ```
 
-For `defs`, `outline`, `files`, `show`, and `metrics`, the JSON format emits an array of objects, uses native JSON numbers, preserves nullable fields as `null`, and emits `[]` when there are no rows.
+For `defs`, `outline`, `files`, `show`, and `metrics`, the JSON format emits an array of objects, uses native JSON numbers, preserves nullable fields as `null`, and emits `[]` when there are no rows. `refs` instead emits one object containing `query`, `definitions`, and `candidates` arrays.
 
 Show index-wide counts and build metadata:
 

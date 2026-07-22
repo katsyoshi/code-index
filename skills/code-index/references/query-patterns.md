@@ -23,6 +23,8 @@ Run `code-index schema --root "$PWD"` to inspect the tables and columns in the c
 - `kind`: `function`, `method`, `class`, `module`, `type`, `trait`, `enum`, `interface`, `constant`, or `section`
 - `name`: extracted symbol name
 - `line`: 1-based line number
+- `end_line`: 1-based inclusive end line; equals `line` when the extractor does
+  not know the symbol range
 - `column`: 1-based column number
 - `signature`: matched definition line
 - `context`: nearby source lines
@@ -166,15 +168,30 @@ limit 50;
 
 ## Call-Site Or Reference Lookup
 
-This index is regex-based and does not build a typed call graph. For likely call sites, query indexed lines and exclude definition-like rows:
+This index is regex-based and does not build a typed call graph. For likely
+call sites, use `refs`:
+
+```bash
+"$TOOL" refs --format json parse_config
+```
+
+The command performs case-sensitive complete-identifier matching by default,
+keeps comments and strings searchable, excludes exact symbol definition rows,
+and includes enclosing lexical scope when symbol ranges are available.
+For custom matching, query the same tables directly:
 
 ```sql
 select files.path, lines.line, lines.text
 from lines
 join files on files.id = lines.file_id
 where lines.text like '%parse_config%' collate nocase
-  and lines.text not like '%def parse_config%'
-  and lines.text not like '%function parse_config%'
+  and not exists (
+    select 1
+    from symbols
+    where symbols.file_id = lines.file_id
+      and symbols.line = lines.line
+      and symbols.name = 'parse_config' collate nocase
+  )
 order by files.path, lines.line
 limit 100;
 ```

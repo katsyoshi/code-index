@@ -36,6 +36,7 @@ var commands = []command{
 	{name: "update", usage: "code-index update [--db DB] [--max-bytes N] [--adopt] [--format text|json] [ROOT]", summary: "create or incrementally refresh the index"},
 	{name: "defs", usage: "code-index defs [--root ROOT|--db DB] [--kind KIND] [--language LANG] [--list] [--format text|json] [QUERY]", summary: "list or find symbol definitions"},
 	{name: "outline", usage: "code-index outline [--root ROOT|--db DB] [--format text|json] PATH", summary: "show symbols in one indexed file"},
+	{name: "refs", usage: "code-index refs [--root ROOT|--db DB] [--kind KIND]... [--language LANG] [--ignore-case] [--limit N] [--format text|json] NAME", summary: "find likely symbol references"},
 	{name: "files", usage: "code-index files [--root ROOT|--db DB] [--language LANG] [--list] [--format text|json] [QUERY]", summary: "list or find indexed files"},
 	{name: "sql", usage: "code-index sql [--root ROOT|--db DB] [--format text|json] [SQL]", summary: "run read-only SQL"},
 	{name: "show", usage: "code-index show [--root ROOT|--db DB] --line N [--context N] [--format text|json] PATH", summary: "show indexed source around a line"},
@@ -76,6 +77,8 @@ func commandHandler(name string) func([]string) error {
 		return cmdDefs
 	case "outline":
 		return cmdOutline
+	case "refs":
+		return cmdRefs
 	case "files":
 		return cmdFiles
 	case "sql":

@@ -35,6 +35,8 @@ func (s *Service) Run(ctx context.Context) error {
 	assertSymbol(t, symbols, "type", "Alias", 11)
 	assertSymbol(t, symbols, "function", "NewService", 13)
 	assertSymbol(t, symbols, "method", "Run", 17)
+	assertSymbolEndLine(t, symbols, "function", "NewService", 15)
+	assertSymbolEndLine(t, symbols, "method", "Run", 19)
 	assertNoSymbol(t, symbols, "function", "ignored")
 }
 
@@ -107,6 +109,9 @@ end
 	assertSymbol(t, symbols, "constant", "CONST", 3)
 	assertSymbol(t, symbols, "method", "self.build", 5)
 	assertSymbol(t, symbols, "method", "perform!", 8)
+	assertSymbolEndLine(t, symbols, "module", "Sample", 11)
+	assertSymbolEndLine(t, symbols, "class", "Worker", 10)
+	assertSymbolEndLine(t, symbols, "method", "perform!", 9)
 }
 
 func TestParseRubyParseYDumpSymbols(t *testing.T) {
@@ -142,6 +147,30 @@ end
 	assertSymbol(t, symbols, "constant", "CONST", 3)
 	assertSymbol(t, symbols, "method", "self.build", 5)
 	assertSymbol(t, symbols, "method", "perform!", 8)
+	assertSymbolEndLine(t, symbols, "module", "Sample", 11)
+	assertSymbolEndLine(t, symbols, "class", "Worker", 10)
+	assertSymbolEndLine(t, symbols, "method", "perform!", 9)
+}
+
+func TestExtractMacroSymbols(t *testing.T) {
+	tests := []struct {
+		language string
+		source   string
+		name     string
+	}{
+		{language: "c", source: "#define DECLARE_CLASS(name) class name {}", name: "DECLARE_CLASS"},
+		{language: "cpp", source: "# define VALUE 42", name: "VALUE"},
+		{language: "rust", source: "macro_rules! make_item { () => {} }", name: "make_item"},
+		{language: "elisp", source: "(defmacro with-value (name) nil)", name: "with-value"},
+		{language: "clojure", source: "(defmacro with-value [name] nil)", name: "with-value"},
+		{language: "elixir", source: "defmacro build(value) do", name: "build"},
+	}
+	for _, test := range tests {
+		t.Run(test.language, func(t *testing.T) {
+			symbols := Extract("sample", test.language, []string{test.source})
+			assertSymbol(t, symbols, "macro", test.name, 1)
+		})
+	}
 }
 
 func assertSymbol(t *testing.T, symbols []Symbol, kind, name string, line int) {
@@ -161,6 +190,19 @@ func assertNoSymbol(t *testing.T, symbols []Symbol, kind, name string) {
 			t.Fatalf("unexpected symbol %s %s found in %+v", kind, name, symbols)
 		}
 	}
+}
+
+func assertSymbolEndLine(t *testing.T, symbols []Symbol, kind, name string, endLine int) {
+	t.Helper()
+	for _, symbol := range symbols {
+		if symbol.Kind == kind && symbol.Name == name {
+			if symbol.EndLine != endLine {
+				t.Fatalf("symbol %s %s end line = %d, want %d", kind, name, symbol.EndLine, endLine)
+			}
+			return
+		}
+	}
+	t.Fatalf("symbol %s %s not found in %+v", kind, name, symbols)
 }
 
 func splitLines(text string) []string {

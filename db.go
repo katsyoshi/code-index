@@ -17,7 +17,7 @@ import (
 	"time"
 )
 
-const schemaVersion = "2"
+const schemaVersion = "3"
 const contentHashAlgorithm = "sha256"
 const fileSource = "git-tracked"
 
