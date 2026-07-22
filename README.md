@@ -8,6 +8,15 @@ The binary is written in Go and uses the `sqlite3` command for database creation
 
 The reusable agent skill source lives at `skills/code-index/SKILL.md`. It is written to be usable by coding agents such as Codex or Claude. Agents should use an explicit `CODE_INDEX_BIN` path instead of searching `PATH`, so they do not accidentally run a different `code-index` binary.
 
+## Agent configuration
+
+Repository-wide contributor guidance belongs in `AGENTS.md`, and the reusable
+agent workflow belongs in `skills/code-index/`. Configure agent runtimes such
+as Codex or Claude individually for your own environment. Their repository-local
+configuration directories (`.codex/` and `.claude/`) are ignored and should not
+be committed. Machine-specific paths and commands can be kept in
+`.local/AGENTS.md`, which is also ignored.
+
 ## Design
 
 `code-index` is a lightweight retrieval layer for agents, not a language server. It is designed to reduce how much source an LLM needs to read, not to expand context.
