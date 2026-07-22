@@ -30,9 +30,25 @@ type defsJSONRow struct {
 }
 
 type filesJSONRow struct {
-	Path     string  `json:"path"`
-	Language *string `json:"language"`
-	Size     int64   `json:"size"`
+	Path           string  `json:"path"`
+	Language       *string `json:"language"`
+	Size           int64   `json:"size"`
+	Status         string  `json:"status"`
+	SourceEncoding *string `json:"source_encoding"`
+	EncodingSource *string `json:"encoding_source"`
+	Transcoded     bool    `json:"transcoded"`
+	SkipReason     *string `json:"skip_reason"`
+}
+
+type filesJSONRawRow struct {
+	Path           string  `json:"path"`
+	Language       *string `json:"language"`
+	Size           int64   `json:"size"`
+	Status         string  `json:"index_status"`
+	SourceEncoding *string `json:"source_encoding"`
+	EncodingSource *string `json:"encoding_source"`
+	Transcoded     int     `json:"transcoded"`
+	SkipReason     *string `json:"skip_reason"`
 }
 
 type showJSONRow struct {
@@ -75,6 +91,7 @@ type statsJSONRaw struct {
 	VCSBranch     *string `json:"vcs_branch"`
 	VCSDirty      *int    `json:"vcs_dirty"`
 	Files         int64   `json:"files"`
+	SkippedFiles  int64   `json:"skipped_files"`
 	Symbols       int64   `json:"symbols"`
 	Lines         int64   `json:"lines"`
 	CodeLines     int64   `json:"code_lines"`
@@ -98,6 +115,7 @@ type statsJSONResult struct {
 	VCSBranch     *string `json:"vcs_branch"`
 	VCSDirty      *bool   `json:"vcs_dirty"`
 	Files         int64   `json:"files"`
+	SkippedFiles  int64   `json:"skipped_files"`
 	Symbols       int64   `json:"symbols"`
 	Lines         int64   `json:"lines"`
 	CodeLines     int64   `json:"code_lines"`
@@ -194,6 +212,7 @@ func cmdFiles(args []string) error {
 	root := fs.String("root", "", "repository root for default database path")
 	db := fs.String("db", "", "database path")
 	language := fs.String("language", "", "language filter")
+	status := fs.String("status", "indexed", "file status: indexed, skipped, or all")
 	limit := fs.Int("limit", 100, "maximum rows")
 	list := fs.Bool("list", false, "list indexed files without a query")
 	formatFlag := fs.String("format", "text", "output format: text or json")
@@ -215,6 +234,15 @@ func cmdFiles(args []string) error {
 	if *language != "" {
 		where += " and language = " + quote(*language)
 	}
+	switch *status {
+	case "indexed":
+		where += " and index_status = 'indexed'"
+	case "skipped":
+		where += " and index_status = 'skipped'"
+	case "all":
+	default:
+		return fmt.Errorf("unsupported file status %q: use indexed, skipped, or all", *status)
+	}
 	sql := formatEmbeddedSQL("files.sql", where, *limit)
 	dbPath, _, err := resolveDB(*db, *root)
 	if err != nil {
@@ -223,9 +251,17 @@ func cmdFiles(args []string) error {
 	if format == outputFormatText {
 		return runSQLitePrint(dbPath, sql)
 	}
-	rows := make([]filesJSONRow, 0)
-	if err := sqliteJSONQuery(dbPath, sql, &rows); err != nil {
+	rawRows := make([]filesJSONRawRow, 0)
+	if err := sqliteJSONQuery(dbPath, sql, &rawRows); err != nil {
 		return err
+	}
+	rows := make([]filesJSONRow, 0, len(rawRows))
+	for _, row := range rawRows {
+		rows = append(rows, filesJSONRow{
+			Path: row.Path, Language: row.Language, Size: row.Size, Status: row.Status,
+			SourceEncoding: row.SourceEncoding, EncodingSource: row.EncodingSource,
+			Transcoded: row.Transcoded != 0, SkipReason: row.SkipReason,
+		})
 	}
 	return writeJSON(os.Stdout, rows)
 }
@@ -353,6 +389,7 @@ func cmdStats(args []string) error {
 		VCSBranch:     raw.VCSBranch,
 		VCSDirty:      integerBoolPointer(raw.VCSDirty),
 		Files:         raw.Files,
+		SkippedFiles:  raw.SkippedFiles,
 		Symbols:       raw.Symbols,
 		Lines:         raw.Lines,
 		CodeLines:     raw.CodeLines,

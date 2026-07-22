@@ -17,7 +17,7 @@ import (
 	"time"
 )
 
-const schemaVersion = "3"
+const schemaVersion = "4"
 const contentHashAlgorithm = "sha256"
 const fileSource = "git-tracked"
 
@@ -147,14 +147,16 @@ type metaPair struct {
 }
 
 type buildConfig struct {
-	maxBytes   int64
-	ignoreDirs []string
+	maxBytes          int64
+	ignoreDirs        []string
+	encodingFallbacks []string
 }
 
 func defaultBuildConfig() buildConfig {
 	return buildConfig{
-		maxBytes:   defaultMaxBytes,
-		ignoreDirs: ignoredDirNames(nil),
+		maxBytes:          defaultMaxBytes,
+		ignoreDirs:        ignoredDirNames(nil),
+		encodingFallbacks: []string{},
 	}
 }
 
@@ -167,6 +169,7 @@ func writeOperationMetaSQL(w io.Writer, root, operation string, fts bool, config
 		{"hash_algorithm", contentHashAlgorithm},
 		{"config_max_bytes", int64Text(config.maxBytes)},
 		{"config_ignore_dirs", stringListText(config.ignoreDirs)},
+		{"config_encoding_fallbacks", stringListText(config.encodingFallbacks)},
 		{"fts5", boolText(fts)},
 		{"indexed_at", now},
 		{"updated_at", now},
@@ -224,7 +227,7 @@ func loadIndexedFileStates(db string) (map[string]indexedFileState, error) {
 			continue
 		}
 		cols := strings.Split(line, "\t")
-		if len(cols) != 4 {
+		if len(cols) != 5 {
 			return nil, fmt.Errorf("unexpected files row from sqlite3: %q", line)
 		}
 		size, err := strconv.ParseInt(cols[2], 10, 64)
@@ -239,6 +242,7 @@ func loadIndexedFileStates(db string) (map[string]indexedFileState, error) {
 			contentHash: cols[1],
 			size:        size,
 			mtime:       mtime,
+			indexStatus: cols[4],
 		}
 	}
 	return states, nil

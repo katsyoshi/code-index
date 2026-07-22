@@ -11,7 +11,7 @@ func TestVersionCommand(t *testing.T) {
 	}
 	var result versionJSONResult
 	decodeRunJSON(t, []string{"version", "--format", "json"}, &result)
-	if result.SchemaVersion != 3 || result.FileSource != fileSource {
+	if result.SchemaVersion != 4 || result.FileSource != fileSource {
 		t.Fatalf("version JSON = %#v", result)
 	}
 	if result.Commit != nil && *result.Commit == "unknown" {

@@ -81,6 +81,45 @@ func TestProjectConfigRejectsDBOutsideRootAndUnknownKeys(t *testing.T) {
 	}
 }
 
+func TestEncodingFallbacksAreProjectOnlyAndOrdered(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	path := filepath.Join(root, projectConfigName)
+	config := "[encoding]\nfallbacks = [\"Windows-31J\", \"EUC-JP\"]\n"
+	if err := os.WriteFile(path, []byte(config), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := resolveConfig(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"Windows-31J", "EUC-JP"}
+	if len(resolved.build.encodingFallbacks) != len(want) || resolved.build.encodingFallbacks[0] != want[0] || resolved.build.encodingFallbacks[1] != want[1] {
+		t.Fatalf("encoding fallbacks = %#v", resolved.build.encodingFallbacks)
+	}
+
+	if err := os.WriteFile(path, []byte("[encoding]\nfallbacks = [\"EUC-JP\", \"euc-jp\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := resolveConfig(root); err == nil || !strings.Contains(err.Error(), "duplicate encoding") {
+		t.Fatalf("duplicate fallback error = %v", err)
+	}
+
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	userPath := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "code-index", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(userPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(userPath, []byte(config), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := resolveConfig(root); err == nil || !strings.Contains(err.Error(), "only allowed in project config") {
+		t.Fatalf("user encoding error = %v", err)
+	}
+}
+
 func TestResolveRootOrCurrentUsesGitRoot(t *testing.T) {
 	root := t.TempDir()
 	initGitRepo(t, root)
@@ -114,7 +153,7 @@ func TestRebuildUsesProjectConfigAndCommandLineOverrides(t *testing.T) {
 		t.Fatal(err)
 	}
 	initGitRepo(t, root, "main.go")
-	config := "db = \".index/code.sqlite\"\nmax_bytes = 12345\nignore_dirs = [\"generated\"]\n"
+	config := "db = \".index/code.sqlite\"\nmax_bytes = 12345\nignore_dirs = [\"generated\"]\n[encoding]\nfallbacks = [\"Windows-31J\"]\n"
 	if err := os.WriteFile(filepath.Join(root, projectConfigName), []byte(config), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -126,9 +165,18 @@ func TestRebuildUsesProjectConfigAndCommandLineOverrides(t *testing.T) {
 	assertMetaValue(t, db, "config_max_bytes", "12345")
 	ignoreDirs := ignoredDirNames([]string{"generated"})
 	assertMetaValue(t, db, "config_ignore_dirs", stringListText(ignoreDirs))
+	assertMetaValue(t, db, "config_encoding_fallbacks", stringListText([]string{"Windows-31J"}))
 
 	err := run([]string{"update", "--max-bytes", "54321", root})
 	if err == nil || !strings.Contains(err.Error(), "max bytes setting is incompatible") {
 		t.Fatalf("update CLI override error = %v", err)
+	}
+	changedConfig := "db = \".index/code.sqlite\"\nmax_bytes = 12345\nignore_dirs = [\"generated\"]\n[encoding]\nfallbacks = [\"EUC-JP\"]\n"
+	if err := os.WriteFile(filepath.Join(root, projectConfigName), []byte(changedConfig), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err = run([]string{"update", root})
+	if err == nil || !strings.Contains(err.Error(), "encoding fallbacks setting is incompatible") {
+		t.Fatalf("update encoding fallback error = %v", err)
 	}
 }

@@ -17,42 +17,43 @@ type componentStatus struct {
 }
 
 type statusJSONResult struct {
-	DB                    string             `json:"db"`
-	Exists                bool               `json:"exists"`
-	Locked                bool               `json:"locked"`
-	Root                  *string            `json:"root"`
-	SchemaVersion         *int64             `json:"schema_version"`
-	FileSource            *string            `json:"file_source"`
-	HashAlgorithm         *string            `json:"hash_algorithm"`
-	ConfigMaxBytes        *int64             `json:"config_max_bytes"`
-	ConfigIgnoreDirs      *[]string          `json:"config_ignore_dirs"`
-	IndexedAt             *string            `json:"indexed_at"`
-	UpdatedAt             *string            `json:"updated_at"`
-	LastOperation         *string            `json:"last_operation"`
-	VCSKind               *string            `json:"vcs_kind"`
-	VCSHead               *string            `json:"vcs_head"`
-	VCSBranch             *string            `json:"vcs_branch"`
-	VCSDirty              *bool              `json:"vcs_dirty"`
-	VCSDirtyHash          *string            `json:"vcs_dirty_hash"`
-	VCSRevision           *string            `json:"vcs_revision"`
-	VCSRef                *string            `json:"vcs_ref"`
-	FTS5                  *bool              `json:"fts5"`
-	Components            *[]componentStatus `json:"components"`
-	CurrentVCSKind        *string            `json:"current_vcs_kind"`
-	CurrentVCSHead        *string            `json:"current_vcs_head"`
-	CurrentVCSBranch      *string            `json:"current_vcs_branch"`
-	CurrentVCSDirty       *bool              `json:"current_vcs_dirty"`
-	UpdateCompatible      *bool              `json:"update_compatible"`
-	UpdateRequiresAdopt   *bool              `json:"update_requires_adopt"`
-	UpdateRebuildRequired *bool              `json:"update_rebuild_required"`
-	UpdateBlocker         *string            `json:"update_blocker"`
-	IndexStale            *bool              `json:"index_stale"`
-	Lock                  *string            `json:"lock"`
-	LockOperation         *string            `json:"lock_operation"`
-	LockPID               *int               `json:"lock_pid"`
-	LockStale             *bool              `json:"lock_stale"`
-	LockStartedAt         *string            `json:"lock_started_at"`
-	LockRoot              *string            `json:"lock_root"`
+	DB                      string             `json:"db"`
+	Exists                  bool               `json:"exists"`
+	Locked                  bool               `json:"locked"`
+	Root                    *string            `json:"root"`
+	SchemaVersion           *int64             `json:"schema_version"`
+	FileSource              *string            `json:"file_source"`
+	HashAlgorithm           *string            `json:"hash_algorithm"`
+	ConfigMaxBytes          *int64             `json:"config_max_bytes"`
+	ConfigIgnoreDirs        *[]string          `json:"config_ignore_dirs"`
+	ConfigEncodingFallbacks *[]string          `json:"config_encoding_fallbacks"`
+	IndexedAt               *string            `json:"indexed_at"`
+	UpdatedAt               *string            `json:"updated_at"`
+	LastOperation           *string            `json:"last_operation"`
+	VCSKind                 *string            `json:"vcs_kind"`
+	VCSHead                 *string            `json:"vcs_head"`
+	VCSBranch               *string            `json:"vcs_branch"`
+	VCSDirty                *bool              `json:"vcs_dirty"`
+	VCSDirtyHash            *string            `json:"vcs_dirty_hash"`
+	VCSRevision             *string            `json:"vcs_revision"`
+	VCSRef                  *string            `json:"vcs_ref"`
+	FTS5                    *bool              `json:"fts5"`
+	Components              *[]componentStatus `json:"components"`
+	CurrentVCSKind          *string            `json:"current_vcs_kind"`
+	CurrentVCSHead          *string            `json:"current_vcs_head"`
+	CurrentVCSBranch        *string            `json:"current_vcs_branch"`
+	CurrentVCSDirty         *bool              `json:"current_vcs_dirty"`
+	UpdateCompatible        *bool              `json:"update_compatible"`
+	UpdateRequiresAdopt     *bool              `json:"update_requires_adopt"`
+	UpdateRebuildRequired   *bool              `json:"update_rebuild_required"`
+	UpdateBlocker           *string            `json:"update_blocker"`
+	IndexStale              *bool              `json:"index_stale"`
+	Lock                    *string            `json:"lock"`
+	LockOperation           *string            `json:"lock_operation"`
+	LockPID                 *int               `json:"lock_pid"`
+	LockStale               *bool              `json:"lock_stale"`
+	LockStartedAt           *string            `json:"lock_started_at"`
+	LockRoot                *string            `json:"lock_root"`
 }
 
 type currentStatusResult struct {
@@ -146,6 +147,7 @@ func printMetaStatus(meta map[string]string) {
 		"hash_algorithm",
 		"config_max_bytes",
 		"config_ignore_dirs",
+		"config_encoding_fallbacks",
 		"indexed_at",
 		"updated_at",
 		"last_operation",
@@ -261,6 +263,7 @@ func writeStatusJSON(db, root string, dbExists bool, lockInfo indexLockInfo, loc
 		result.HashAlgorithm = stringPointer(meta["hash_algorithm"])
 		result.ConfigMaxBytes = int64Pointer(meta["config_max_bytes"])
 		result.ConfigIgnoreDirs = stringSlicePointer(meta["config_ignore_dirs"])
+		result.ConfigEncodingFallbacks = stringSlicePointer(meta["config_encoding_fallbacks"])
 		result.IndexedAt = stringPointer(meta["indexed_at"])
 		result.UpdatedAt = stringPointer(meta["updated_at"])
 		result.LastOperation = stringPointer(meta["last_operation"])

@@ -25,6 +25,9 @@ type fileConfig struct {
 	DB         *string   `toml:"db"`
 	MaxBytes   *int64    `toml:"max_bytes"`
 	IgnoreDirs *[]string `toml:"ignore_dirs"`
+	Encoding   *struct {
+		Fallbacks []string `toml:"fallbacks"`
+	} `toml:"encoding"`
 }
 
 type resolvedConfig struct {
@@ -92,6 +95,16 @@ func resolveConfig(root string) (resolvedConfig, error) {
 		}
 		if config.IgnoreDirs != nil {
 			result.build.ignoreDirs = ignoredDirNames(*config.IgnoreDirs)
+		}
+		if config.Encoding != nil {
+			if candidate.scope != configScopeProject {
+				return resolvedConfig{}, fmt.Errorf("encoding is only allowed in project config: %s", candidate.path)
+			}
+			fallbacks, err := validateEncodingFallbacks(config.Encoding.Fallbacks)
+			if err != nil {
+				return resolvedConfig{}, fmt.Errorf("invalid encoding.fallbacks in %s: %w", candidate.path, err)
+			}
+			result.build.encodingFallbacks = fallbacks
 		}
 		if config.DB != nil {
 			if candidate.scope != configScopeProject {

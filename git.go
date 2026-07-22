@@ -175,7 +175,7 @@ func currentDirtyHash(root string) (string, bool, error) {
 	parts := []string{}
 	seen := map[string]bool{}
 	err = walkGitTrackedFileSet(root, cloneIgnored(nil), defaultMaxBytes, candidates, func(path string, info fs.FileInfo) error {
-		index, err := scanFileIndex(root, path, info, defaultMaxBytes)
+		index, err := scanFileIndex(root, path, info, defaultBuildConfig())
 		if err != nil {
 			return nil
 		}

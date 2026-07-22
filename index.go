@@ -3,41 +3,48 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"unicode/utf8"
 
 	codesymbols "github.com/katsyoshi/code-index/internal/symbols"
 )
 
 type fileIndex struct {
-	path        string
-	language    string
-	extension   string
-	size        int64
-	mtime       int64
-	contentHash string
-	text        string
-	lines       []string
-	symbols     []codesymbols.Symbol
-	metrics     fileMetrics
+	path           string
+	language       string
+	extension      string
+	size           int64
+	mtime          int64
+	contentHash    string
+	indexStatus    string
+	sourceEncoding string
+	encodingSource string
+	transcoded     bool
+	skipReason     string
+	text           string
+	lines          []string
+	symbols        []codesymbols.Symbol
+	metrics        fileMetrics
 }
 
 type indexedFileState struct {
 	contentHash string
 	size        int64
 	mtime       int64
+	indexStatus string
 }
 
-func scanFileIndex(root, path string, info fs.FileInfo, maxBytes int64) (fileIndex, error) {
-	text, err := readText(path, maxBytes)
+func scanFileIndex(root, path string, info fs.FileInfo, config buildConfig) (fileIndex, error) {
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return fileIndex{}, err
+	}
+	if int64(len(data)) > config.maxBytes {
+		return fileIndex{}, errNotText
 	}
 	rel, err := filepath.Rel(root, path)
 	if err != nil {
@@ -45,21 +52,28 @@ func scanFileIndex(root, path string, info fs.FileInfo, maxBytes int64) (fileInd
 	}
 	rel = filepath.ToSlash(rel)
 	language := detectLanguage(path)
+	decoded, err := decodeSource(data, language, config.encodingFallbacks)
+	if err != nil {
+		return fileIndex{}, err
+	}
+	index := fileIndex{
+		path: rel, language: language, extension: strings.ToLower(filepath.Ext(path)),
+		size: info.Size(), mtime: info.ModTime().Unix(), contentHash: contentHash(data),
+		indexStatus: decoded.indexStatus, sourceEncoding: decoded.sourceEncoding,
+		encodingSource: decoded.encodingSource, transcoded: decoded.transcoded, skipReason: decoded.skipReason,
+	}
+	if decoded.indexStatus == indexStatusSkipped {
+		return index, nil
+	}
+	text := decoded.text
 	lines := splitLines(text)
 	symbols := codesymbols.Extract(rel, language, lines)
 	metrics := computeFileMetrics(language, lines, len(symbols))
-	return fileIndex{
-		path:        rel,
-		language:    language,
-		extension:   strings.ToLower(filepath.Ext(path)),
-		size:        info.Size(),
-		mtime:       info.ModTime().Unix(),
-		contentHash: contentHash(text),
-		text:        text,
-		lines:       lines,
-		symbols:     symbols,
-		metrics:     metrics,
-	}, nil
+	index.text = text
+	index.lines = lines
+	index.symbols = symbols
+	index.metrics = metrics
+	return index, nil
 }
 
 func writeFileIndexDeleteSQL(w io.Writer, path string, fts bool) {
@@ -75,6 +89,10 @@ func writeFileIndexInsertSQL(w io.Writer, index fileIndex, fts bool, fileID int,
 	quotedLanguage := nullableQuote(index.language)
 	quotedExtension := quote(index.extension)
 	quotedContentHash := quote(index.contentHash)
+	quotedIndexStatus := quote(index.indexStatus)
+	quotedSourceEncoding := nullableQuote(index.sourceEncoding)
+	quotedEncodingSource := nullableQuote(index.encodingSource)
+	quotedSkipReason := nullableQuote(index.skipReason)
 	fileIDExpr := "(select id from files where path = " + quotedPath + ")"
 	if fileID > 0 {
 		writeSQL(
@@ -89,6 +107,11 @@ func writeFileIndexInsertSQL(w io.Writer, index fileIndex, fts bool, fileID int,
 				index.size,
 				index.mtime,
 				quotedContentHash,
+				quotedIndexStatus,
+				quotedSourceEncoding,
+				quotedEncodingSource,
+				boolInt(index.transcoded),
+				quotedSkipReason,
 			),
 		)
 		fileIDExpr = strconv.Itoa(fileID)
@@ -104,8 +127,16 @@ func writeFileIndexInsertSQL(w io.Writer, index fileIndex, fts bool, fileID int,
 				index.size,
 				index.mtime,
 				quotedContentHash,
+				quotedIndexStatus,
+				quotedSourceEncoding,
+				quotedEncodingSource,
+				boolInt(index.transcoded),
+				quotedSkipReason,
 			),
 		)
+	}
+	if index.indexStatus != indexStatusIndexed {
+		return
 	}
 	for lineIndex, line := range index.lines {
 		writeSQL(w, "insert into lines(file_id, line, text) values(%s, %d, %s);\n", fileIDExpr, lineIndex+1, quote(line))
@@ -174,20 +205,6 @@ func writeFileIndexInsertSQL(w io.Writer, index fileIndex, fts bool, fileID int,
 	}
 }
 
-func readText(path string, maxBytes int64) (string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	if int64(len(data)) > maxBytes || bytesContainNUL(data) {
-		return "", errors.New("not text")
-	}
-	if !utf8.Valid(data) {
-		return strings.ToValidUTF8(string(data), "?"), nil
-	}
-	return string(data), nil
-}
-
 func bytesContainNUL(data []byte) bool {
 	limit := len(data)
 	if limit > 8192 {
@@ -222,7 +239,14 @@ func splitLines(text string) []string {
 	return lines
 }
 
-func contentHash(text string) string {
-	sum := sha256.Sum256([]byte(text))
+func contentHash(data []byte) string {
+	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
+}
+
+func boolInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
 }

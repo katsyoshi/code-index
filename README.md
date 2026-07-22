@@ -116,6 +116,23 @@ Rebuild an index atomically from Git-tracked files:
 ./code-index rebuild --format json /path/to/repo
 ```
 
+Source text is stored as UTF-8. UTF-8 and BOM-marked UTF-16/UTF-32 are handled
+internally. Ruby and Python source-encoding declarations are honored. A project
+with legacy source may provide ordered fallback encodings in `.code-index.toml`:
+
+```toml
+[encoding]
+fallbacks = ["Windows-31J", "EUC-JP"]
+```
+
+Fallback conversion uses the optional `iconv` command. Files with unknown or
+unconvertible encodings are retained as skipped metadata and do not contribute
+lines, symbols, metrics, or FTS content. Build output reports transcoded and
+encoding-skipped counts; use `-v` or `--verbose` to include per-file details.
+Changing the fallback list requires a rebuild before the next update. See
+[`docs/DESIGNS/text-encoding.md`](docs/DESIGNS/text-encoding.md) for the full
+contract.
+
 `rebuild` requires a Git work tree and indexes files reported by `git ls-files`. If another `init`, `rebuild`, or `update` is already running for the same database, `rebuild` skips and exits successfully.
 
 Initialize an empty index database:
@@ -205,9 +222,15 @@ Find files:
 ./code-index files --root /path/to/repo --list --format json
 ./code-index files --root /path/to/repo config
 ./code-index files --root /path/to/repo --format json config
+./code-index files --root /path/to/repo --status skipped --list
+./code-index files --root /path/to/repo --status all --list --format json
 ```
 
-Use `--list` without `QUERY` to list files that are actually present in the index, ordered by path. `--language` and `--limit` apply to both listing and searching. Combining `--list` with `QUERY` is an error.
+Use `--list` without `QUERY` to list files, ordered by path. The default
+`--status indexed` returns searchable files. Use `--status skipped` for files
+omitted because their encoding could not be determined or converted, and
+`--status all` for both. `--language` and `--limit` apply to listing and
+searching. Combining `--list` with `QUERY` is an error.
 
 Run read-only SQL:
 

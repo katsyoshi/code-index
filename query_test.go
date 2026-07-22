@@ -27,7 +27,7 @@ func TestStatsCommandJSONOutputUsesNativeTypesAndNulls(t *testing.T) {
 
 	var result statsJSONResult
 	decodeRunJSON(t, []string{"stats", "--db", db, "--format", "json"}, &result)
-	if result.Root == nil || *result.Root != root || result.SchemaVersion == nil || *result.SchemaVersion != 3 || result.FileSource == nil || *result.FileSource != fileSource {
+	if result.Root == nil || *result.Root != root || result.SchemaVersion == nil || *result.SchemaVersion != 4 || result.FileSource == nil || *result.FileSource != fileSource {
 		t.Fatalf("stats JSON metadata = %#v", result)
 	}
 	if result.Files != 0 || result.Symbols != 0 || result.Lines != 0 || result.CodeLines != 0 || result.CommentLines != 0 || result.BlankLines != 0 {

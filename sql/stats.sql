@@ -10,7 +10,8 @@ union all select 'vcs_ref', value from meta where key = 'vcs_ref'
 union all select 'vcs_head', value from meta where key = 'vcs_head'
 union all select 'vcs_branch', value from meta where key = 'vcs_branch'
 union all select 'vcs_dirty', value from meta where key = 'vcs_dirty'
-union all select 'files', cast(count(*) as text) from files
+union all select 'files', cast(count(*) as text) from files where index_status = 'indexed'
+union all select 'skipped_files', cast(count(*) as text) from files where index_status = 'skipped'
 union all select 'symbols', cast(count(*) as text) from symbols
 union all select 'lines', cast(count(*) as text) from lines
 union all select 'code_lines', cast(coalesce(sum(code_lines), 0) as text) from file_metrics

@@ -70,6 +70,7 @@ export CODE_INDEX_CACHE_DIR="${CODE_INDEX_CACHE_DIR:-/tmp/code-index}"
 
 ```bash
 "$TOOL" update --format json
+"$TOOL" update -v --format json
 ```
 
 If `update` reports that the index does not exist yet, run `rebuild` explicitly:
@@ -172,6 +173,7 @@ Common commands:
 # Find files by path.
 "$TOOL" files --list --format json
 "$TOOL" files --format json repository
+"$TOOL" files --status skipped --list --format json
 
 # Inspect the available tables and columns in the agent-oriented format.
 "$TOOL" schema --format json
@@ -184,6 +186,11 @@ Common commands:
 ```
 
 Commands run inside a Git work tree discover its repository root automatically. The default database lives under `CODE_INDEX_CACHE_DIR` when set. Otherwise it uses `$XDG_CACHE_HOME/code-index` or `~/.cache/code-index`, keyed by the repository root path. A project `.code-index.toml` may override the database with a repository-relative `db`; pass `--db path/to/index.sqlite` for an explicit one-run override.
+
+Build results include transcoded and encoding-skipped counts. Use `-v` or
+`--verbose` for per-file encoding diagnostics. The normal `files` view contains
+searchable files; use `files --status skipped` to inspect source files retained
+as metadata because their encoding could not be determined or converted.
 
 Use `logs --format json` when diagnosing a failed or skipped `init`, `rebuild`, or `update`. Operation logs live in a separate `<index-db>.logs.sqlite` sidecar and therefore survive atomic replacement of the index DB.
 

@@ -14,7 +14,13 @@ create table files (
   extension text,
   size integer not null,
   mtime integer not null,
-  content_hash text not null
+  content_hash text not null,
+  index_status text not null check (index_status in ('indexed', 'skipped')),
+  source_encoding text,
+  encoding_source text check (encoding_source in ('utf8', 'bom', 'declaration', 'fallback')),
+  transcoded integer not null check (transcoded in (0, 1)),
+  skip_reason text check (skip_reason in ('encoding_unknown', 'encoding_conflict', 'conversion_failed', 'transcoder_unavailable')),
+  check ((index_status = 'indexed' and skip_reason is null) or (index_status = 'skipped' and skip_reason is not null))
 );
 create table symbols (
   id integer primary key,
@@ -47,6 +53,7 @@ create table file_metrics (
 );
 create index idx_files_path on files(path);
 create index idx_files_language on files(language);
+create index idx_files_index_status on files(index_status);
 create index idx_symbols_name on symbols(name);
 create index idx_symbols_path_line on symbols(path, line);
 create index idx_symbols_language_kind on symbols(language, kind);

@@ -57,6 +57,53 @@ func TestBuildCommandsJSONOutput(t *testing.T) {
 	}
 }
 
+func TestEncodingSkipsAreStoredAndTransitionDuringUpdate(t *testing.T) {
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		t.Skip("sqlite3 command not found")
+	}
+	root := t.TempDir()
+	path := filepath.Join(root, "legacy.rb")
+	if err := os.WriteFile(path, []byte{0xff}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	initGitRepo(t, root, "legacy.rb")
+	db := filepath.Join(t.TempDir(), "index.sqlite")
+
+	var rebuilt fullBuildJSONResult
+	decodeRunJSON(t, []string{"rebuild", "-v", "--db", db, "--format", "json", root}, &rebuilt)
+	if rebuilt.Files == nil || *rebuilt.Files != 0 || rebuilt.EncodingSkippedFiles == nil || *rebuilt.EncodingSkippedFiles != 1 || len(rebuilt.Diagnostics) != 1 || rebuilt.Diagnostics[0].Reason != skipReasonEncodingUnknown {
+		t.Fatalf("rebuild encoding result = %#v", rebuilt)
+	}
+	var skipped []filesJSONRow
+	decodeRunJSON(t, []string{"files", "--db", db, "--status", "skipped", "--list", "--format", "json"}, &skipped)
+	if len(skipped) != 1 || skipped[0].Path != "legacy.rb" || skipped[0].Status != indexStatusSkipped || skipped[0].SkipReason == nil || *skipped[0].SkipReason != skipReasonEncodingUnknown {
+		t.Fatalf("skipped files = %#v", skipped)
+	}
+	var indexed []filesJSONRow
+	decodeRunJSON(t, []string{"files", "--db", db, "--list", "--format", "json"}, &indexed)
+	if len(indexed) != 0 {
+		t.Fatalf("indexed files = %#v", indexed)
+	}
+
+	if err := os.WriteFile(path, []byte("puts :ok\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var added updateJSONResult
+	decodeRunJSON(t, []string{"update", "--db", db, "--format", "json", root}, &added)
+	if added.AddedFiles == nil || *added.AddedFiles != 1 || added.DeletedFiles == nil || *added.DeletedFiles != 0 {
+		t.Fatalf("skipped to indexed update = %#v", added)
+	}
+
+	if err := os.WriteFile(path, []byte{0xff}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var deleted updateJSONResult
+	decodeRunJSON(t, []string{"update", "--db", db, "--format", "json", root}, &deleted)
+	if deleted.DeletedFiles == nil || *deleted.DeletedFiles != 1 || deleted.EncodingSkippedFiles == nil || *deleted.EncodingSkippedFiles != 1 {
+		t.Fatalf("indexed to skipped update = %#v", deleted)
+	}
+}
+
 func TestUpdateCommandRequiresExistingIndex(t *testing.T) {
 	if _, err := exec.LookPath("sqlite3"); err != nil {
 		t.Skip("sqlite3 command not found")

@@ -11,33 +11,47 @@ import (
 )
 
 type fullBuildJSONResult struct {
-	Operation     string  `json:"operation"`
-	DB            string  `json:"db"`
-	Root          string  `json:"root"`
-	Skipped       bool    `json:"skipped"`
-	Reason        *string `json:"reason"`
-	Files         *int    `json:"files"`
-	Symbols       *int    `json:"symbols"`
-	Lines         *int    `json:"lines"`
-	CodeLines     *int    `json:"code_lines"`
-	CommentLines  *int    `json:"comment_lines"`
-	BlankLines    *int    `json:"blank_lines"`
-	HashAlgorithm *string `json:"hash_algorithm"`
-	FTS5          *bool   `json:"fts5"`
+	Operation            string               `json:"operation"`
+	DB                   string               `json:"db"`
+	Root                 string               `json:"root"`
+	Skipped              bool                 `json:"skipped"`
+	Reason               *string              `json:"reason"`
+	Files                *int                 `json:"files"`
+	Symbols              *int                 `json:"symbols"`
+	Lines                *int                 `json:"lines"`
+	CodeLines            *int                 `json:"code_lines"`
+	CommentLines         *int                 `json:"comment_lines"`
+	BlankLines           *int                 `json:"blank_lines"`
+	HashAlgorithm        *string              `json:"hash_algorithm"`
+	FTS5                 *bool                `json:"fts5"`
+	TranscodedFiles      *int                 `json:"transcoded_files"`
+	EncodingSkippedFiles *int                 `json:"encoding_skipped_files"`
+	Diagnostics          []encodingDiagnostic `json:"diagnostics,omitempty"`
 }
 
 type updateJSONResult struct {
-	Operation     string  `json:"operation"`
-	DB            string  `json:"db"`
-	Root          string  `json:"root"`
-	Skipped       bool    `json:"skipped"`
-	Reason        *string `json:"reason"`
-	AddedFiles    *int    `json:"added_files"`
-	UpdatedFiles  *int    `json:"updated_files"`
-	DeletedFiles  *int    `json:"deleted_files"`
-	Symbols       *int    `json:"symbols"`
-	HashAlgorithm *string `json:"hash_algorithm"`
-	FTS5          *bool   `json:"fts5"`
+	Operation            string               `json:"operation"`
+	DB                   string               `json:"db"`
+	Root                 string               `json:"root"`
+	Skipped              bool                 `json:"skipped"`
+	Reason               *string              `json:"reason"`
+	AddedFiles           *int                 `json:"added_files"`
+	UpdatedFiles         *int                 `json:"updated_files"`
+	DeletedFiles         *int                 `json:"deleted_files"`
+	Symbols              *int                 `json:"symbols"`
+	HashAlgorithm        *string              `json:"hash_algorithm"`
+	FTS5                 *bool                `json:"fts5"`
+	TranscodedFiles      *int                 `json:"transcoded_files"`
+	EncodingSkippedFiles *int                 `json:"encoding_skipped_files"`
+	Diagnostics          []encodingDiagnostic `json:"diagnostics,omitempty"`
+}
+
+type encodingDiagnostic struct {
+	Path           string  `json:"path"`
+	Status         string  `json:"status"`
+	Reason         string  `json:"reason"`
+	SourceEncoding *string `json:"source_encoding"`
+	EncodingSource *string `json:"encoding_source"`
 }
 
 func cmdInit(args []string) (resultErr error) {
@@ -96,7 +110,7 @@ func cmdInit(args []string) (resultErr error) {
 	if err := createEmptyIndexDB(db, root, "init", fts, config.build); err != nil {
 		return err
 	}
-	result := successfulFullBuildResult("init", db, root, 0, 0, 0, 0, 0, 0, fts)
+	result := successfulFullBuildResult("init", db, root, 0, 0, 0, 0, 0, 0, 0, 0, fts, nil)
 	if format == outputFormatJSON {
 		return writeJSON(os.Stdout, result)
 	}
@@ -108,6 +122,8 @@ func cmdInit(args []string) (resultErr error) {
 	fmt.Printf("code_lines: 0\n")
 	fmt.Printf("comment_lines: 0\n")
 	fmt.Printf("blank_lines: 0\n")
+	fmt.Printf("transcoded_files: 0\n")
+	fmt.Printf("encoding_skipped_files: 0\n")
 	fmt.Printf("hash_algorithm: %s\n", contentHashAlgorithm)
 	fmt.Printf("fts5: %s\n", yesNo(fts))
 	return nil
@@ -146,12 +162,14 @@ func cmdUpdate(args []string) error {
 }
 
 type buildOptions struct {
-	root         string
-	db           string
-	maxBytes     int64
-	extraIgnored repeatedFlag
-	adopt        bool
-	format       outputFormat
+	root              string
+	db                string
+	maxBytes          int64
+	extraIgnored      repeatedFlag
+	encodingFallbacks []string
+	adopt             bool
+	format            outputFormat
+	verbose           bool
 }
 
 func parseBuildOptions(commandName string, args []string, allowAdopt bool) (buildOptions, error) {
@@ -160,6 +178,9 @@ func parseBuildOptions(commandName string, args []string, allowAdopt bool) (buil
 	maxBytes := flags.Int64("max-bytes", defaultMaxBytes, "skip files larger than this")
 	adopt := false
 	formatFlag := flags.String("format", "text", "output format: text or json")
+	verbose := false
+	flags.BoolVar(&verbose, "v", false, "show per-file encoding diagnostics")
+	flags.BoolVar(&verbose, "verbose", false, "show per-file encoding diagnostics")
 	var extraIgnored repeatedFlag
 	flags.Var(&extraIgnored, "ignore-dir", "extra directory name to ignore")
 	if allowAdopt {
@@ -207,19 +228,22 @@ func parseBuildOptions(commandName string, args []string, allowAdopt bool) (buil
 		}
 	}
 	return buildOptions{
-		root:         root,
-		db:           db,
-		maxBytes:     *maxBytes,
-		extraIgnored: append(append(repeatedFlag{}, config.build.ignoreDirs...), extraIgnored...),
-		adopt:        adopt,
-		format:       format,
+		root:              root,
+		db:                db,
+		maxBytes:          *maxBytes,
+		extraIgnored:      append(append(repeatedFlag{}, config.build.ignoreDirs...), extraIgnored...),
+		encodingFallbacks: append([]string{}, config.build.encodingFallbacks...),
+		adopt:             adopt,
+		format:            format,
+		verbose:           verbose,
 	}, nil
 }
 
 func (o buildOptions) config() buildConfig {
 	return buildConfig{
-		maxBytes:   o.maxBytes,
-		ignoreDirs: ignoredDirNames(o.extraIgnored),
+		maxBytes:          o.maxBytes,
+		ignoreDirs:        ignoredDirNames(o.extraIgnored),
+		encodingFallbacks: append([]string{}, o.encodingFallbacks...),
 	}
 }
 
@@ -274,20 +298,32 @@ func runRebuild(args []string) (resultErr error) {
 	ignored := cloneIgnored(options.extraIgnored)
 	var fileCount, symbolCount, lineCount int
 	var codeLineCount, commentLineCount, blankLineCount int
+	var transcodedCount, encodingSkippedCount int
+	diagnostics := []encodingDiagnostic{}
 	nextFileID := 1
 	nextSymbolID := 1
 	err = walkGitTrackedFiles(root, ignored, options.maxBytes, func(path string, info fs.FileInfo) error {
-		index, err := scanFileIndex(root, path, info, options.maxBytes)
+		index, err := scanFileIndex(root, path, info, options.config())
 		if err != nil {
 			return nil
 		}
 		writeFileIndexInsertSQL(writer, index, fts, nextFileID, &nextSymbolID)
-		fileCount++
-		symbolCount += len(index.symbols)
-		lineCount += len(index.lines)
-		codeLineCount += index.metrics.codeLines
-		commentLineCount += index.metrics.commentLines
-		blankLineCount += index.metrics.blankLines
+		if index.indexStatus == indexStatusIndexed {
+			fileCount++
+			symbolCount += len(index.symbols)
+			lineCount += len(index.lines)
+			codeLineCount += index.metrics.codeLines
+			commentLineCount += index.metrics.commentLines
+			blankLineCount += index.metrics.blankLines
+			if index.transcoded {
+				transcodedCount++
+			}
+		} else {
+			encodingSkippedCount++
+			if options.verbose {
+				diagnostics = append(diagnostics, diagnosticFromIndex(index))
+			}
+		}
 		nextFileID++
 		return nil
 	})
@@ -307,7 +343,7 @@ func runRebuild(args []string) (resultErr error) {
 		return err
 	}
 	installed = true
-	result := successfulFullBuildResult("rebuild", db, root, fileCount, symbolCount, lineCount, codeLineCount, commentLineCount, blankLineCount, fts)
+	result := successfulFullBuildResult("rebuild", db, root, fileCount, symbolCount, lineCount, codeLineCount, commentLineCount, blankLineCount, transcodedCount, encodingSkippedCount, fts, diagnostics)
 	if options.format == outputFormatJSON {
 		return writeJSON(os.Stdout, result)
 	}
@@ -319,8 +355,11 @@ func runRebuild(args []string) (resultErr error) {
 	fmt.Printf("code_lines: %d\n", codeLineCount)
 	fmt.Printf("comment_lines: %d\n", commentLineCount)
 	fmt.Printf("blank_lines: %d\n", blankLineCount)
+	fmt.Printf("transcoded_files: %d\n", transcodedCount)
+	fmt.Printf("encoding_skipped_files: %d\n", encodingSkippedCount)
 	fmt.Printf("hash_algorithm: %s\n", contentHashAlgorithm)
 	fmt.Printf("fts5: %s\n", yesNo(fts))
+	printEncodingDiagnostics(diagnostics)
 	return nil
 }
 
@@ -396,8 +435,10 @@ func runUpdate(args []string) (resultErr error) {
 	seen := map[string]bool{}
 	var added, updated, deleted int
 	var symbolCount int
+	var transcodedCount, encodingSkippedCount int
+	diagnostics := []encodingDiagnostic{}
 	err = walkGitTrackedFileSet(root, ignored, options.maxBytes, candidates, func(path string, info fs.FileInfo) error {
-		index, err := scanFileIndex(root, path, info, options.maxBytes)
+		index, err := scanFileIndex(root, path, info, options.config())
 		if err != nil {
 			return nil
 		}
@@ -406,14 +447,29 @@ func runUpdate(args []string) (resultErr error) {
 		if existed && state.contentHash == index.contentHash {
 			return nil
 		}
-		if existed {
-			updated++
-		} else {
+		oldIndexed := existed && state.indexStatus == indexStatusIndexed
+		newIndexed := index.indexStatus == indexStatusIndexed
+		switch {
+		case !oldIndexed && newIndexed:
 			added++
+		case oldIndexed && newIndexed:
+			updated++
+		case oldIndexed && !newIndexed:
+			deleted++
 		}
 		writeFileIndexDeleteSQL(writer, index.path, fts)
 		writeFileIndexInsertSQL(writer, index, fts, 0, nil)
-		symbolCount += len(index.symbols)
+		if newIndexed {
+			symbolCount += len(index.symbols)
+			if index.transcoded {
+				transcodedCount++
+			}
+		} else {
+			encodingSkippedCount++
+			if options.verbose {
+				diagnostics = append(diagnostics, diagnosticFromIndex(index))
+			}
+		}
 		return nil
 	})
 	if err != nil {
@@ -427,7 +483,9 @@ func runUpdate(args []string) (resultErr error) {
 			continue
 		}
 		writeFileIndexDeleteSQL(writer, rel, fts)
-		deleted++
+		if existing[rel].indexStatus == indexStatusIndexed {
+			deleted++
+		}
 	}
 	writeOperationMetaSQL(writer, root, "update", fts, options.config())
 	writeSQL(writer, "commit;\n")
@@ -438,7 +496,7 @@ func runUpdate(args []string) (resultErr error) {
 		return err
 	}
 	writerOK = true
-	result := successfulUpdateResult(db, root, added, updated, deleted, symbolCount, fts)
+	result := successfulUpdateResult(db, root, added, updated, deleted, symbolCount, transcodedCount, encodingSkippedCount, fts, diagnostics)
 	if options.format == outputFormatJSON {
 		return writeJSON(os.Stdout, result)
 	}
@@ -448,25 +506,31 @@ func runUpdate(args []string) (resultErr error) {
 	fmt.Printf("updated_files: %d\n", updated)
 	fmt.Printf("deleted_files: %d\n", deleted)
 	fmt.Printf("symbols: %d\n", symbolCount)
+	fmt.Printf("transcoded_files: %d\n", transcodedCount)
+	fmt.Printf("encoding_skipped_files: %d\n", encodingSkippedCount)
 	fmt.Printf("hash_algorithm: %s\n", contentHashAlgorithm)
 	fmt.Printf("fts5: %s\n", yesNo(fts))
+	printEncodingDiagnostics(diagnostics)
 	return nil
 }
 
-func successfulFullBuildResult(operation, db, root string, files, symbols, lines, codeLines, commentLines, blankLines int, fts bool) fullBuildJSONResult {
+func successfulFullBuildResult(operation, db, root string, files, symbols, lines, codeLines, commentLines, blankLines, transcodedFiles, encodingSkippedFiles int, fts bool, diagnostics []encodingDiagnostic) fullBuildJSONResult {
 	hashAlgorithm := contentHashAlgorithm
 	return fullBuildJSONResult{
-		Operation:     operation,
-		DB:            db,
-		Root:          root,
-		Files:         intResultPointer(files),
-		Symbols:       intResultPointer(symbols),
-		Lines:         intResultPointer(lines),
-		CodeLines:     intResultPointer(codeLines),
-		CommentLines:  intResultPointer(commentLines),
-		BlankLines:    intResultPointer(blankLines),
-		HashAlgorithm: &hashAlgorithm,
-		FTS5:          boolPointer(fts),
+		Operation:            operation,
+		DB:                   db,
+		Root:                 root,
+		Files:                intResultPointer(files),
+		Symbols:              intResultPointer(symbols),
+		Lines:                intResultPointer(lines),
+		CodeLines:            intResultPointer(codeLines),
+		CommentLines:         intResultPointer(commentLines),
+		BlankLines:           intResultPointer(blankLines),
+		HashAlgorithm:        &hashAlgorithm,
+		FTS5:                 boolPointer(fts),
+		TranscodedFiles:      intResultPointer(transcodedFiles),
+		EncodingSkippedFiles: intResultPointer(encodingSkippedFiles),
+		Diagnostics:          diagnostics,
 	}
 }
 
@@ -475,18 +539,52 @@ func skippedFullBuildResult(operation, db, root string) fullBuildJSONResult {
 	return fullBuildJSONResult{Operation: operation, DB: db, Root: root, Skipped: true, Reason: &reason}
 }
 
-func successfulUpdateResult(db, root string, added, updated, deleted, symbols int, fts bool) updateJSONResult {
+func successfulUpdateResult(db, root string, added, updated, deleted, symbols, transcodedFiles, encodingSkippedFiles int, fts bool, diagnostics []encodingDiagnostic) updateJSONResult {
 	hashAlgorithm := contentHashAlgorithm
 	return updateJSONResult{
-		Operation:     "update",
-		DB:            db,
-		Root:          root,
-		AddedFiles:    intResultPointer(added),
-		UpdatedFiles:  intResultPointer(updated),
-		DeletedFiles:  intResultPointer(deleted),
-		Symbols:       intResultPointer(symbols),
-		HashAlgorithm: &hashAlgorithm,
-		FTS5:          boolPointer(fts),
+		Operation:            "update",
+		DB:                   db,
+		Root:                 root,
+		AddedFiles:           intResultPointer(added),
+		UpdatedFiles:         intResultPointer(updated),
+		DeletedFiles:         intResultPointer(deleted),
+		Symbols:              intResultPointer(symbols),
+		HashAlgorithm:        &hashAlgorithm,
+		FTS5:                 boolPointer(fts),
+		TranscodedFiles:      intResultPointer(transcodedFiles),
+		EncodingSkippedFiles: intResultPointer(encodingSkippedFiles),
+		Diagnostics:          diagnostics,
+	}
+}
+
+func diagnosticFromIndex(index fileIndex) encodingDiagnostic {
+	return encodingDiagnostic{
+		Path:           index.path,
+		Status:         index.indexStatus,
+		Reason:         index.skipReason,
+		SourceEncoding: diagnosticStringPointer(index.sourceEncoding),
+		EncodingSource: diagnosticStringPointer(index.encodingSource),
+	}
+}
+
+func diagnosticStringPointer(value string) *string {
+	if value == "" {
+		return nil
+	}
+	return &value
+}
+
+func printEncodingDiagnostics(diagnostics []encodingDiagnostic) {
+	if len(diagnostics) == 0 {
+		return
+	}
+	fmt.Println("encoding_diagnostics:")
+	for _, diagnostic := range diagnostics {
+		encoding := "-"
+		if diagnostic.SourceEncoding != nil {
+			encoding = *diagnostic.SourceEncoding
+		}
+		fmt.Printf("  %s\t%s\t%s\t%s\n", diagnostic.Path, diagnostic.Status, diagnostic.Reason, encoding)
 	}
 }
 
@@ -520,6 +618,8 @@ func validateUpdateCompatibility(meta map[string]string, root string, config bui
 		return fmt.Errorf("index max bytes setting is incompatible: db config_max_bytes=%s, requested config_max_bytes=%s; run rebuild", meta["config_max_bytes"], int64Text(config.maxBytes))
 	case "config_ignore_dirs":
 		return fmt.Errorf("index ignore dirs setting is incompatible: db config_ignore_dirs=%s, requested config_ignore_dirs=%s; run rebuild", meta["config_ignore_dirs"], stringListText(config.ignoreDirs))
+	case "config_encoding_fallbacks":
+		return fmt.Errorf("index encoding fallbacks setting is incompatible: db config_encoding_fallbacks=%s, requested config_encoding_fallbacks=%s; run rebuild", meta["config_encoding_fallbacks"], stringListText(config.encodingFallbacks))
 	case "different_checkout":
 		return fmt.Errorf("index belongs to a different checkout: indexed_root=%s current_root=%s; run rebuild, or run update --adopt if this DB should belong to the current checkout", meta["root"], root)
 	case "unknown_git_history":
@@ -558,6 +658,9 @@ func checkUpdateCompatibility(meta map[string]string, root string, config buildC
 	}
 	if got := meta["config_ignore_dirs"]; got != "" && got != stringListText(config.ignoreDirs) {
 		return updateCompatibility{rebuildRequired: true, blocker: "config_ignore_dirs"}, nil
+	}
+	if got := meta["config_encoding_fallbacks"]; got != "" && got != stringListText(config.encodingFallbacks) {
+		return updateCompatibility{rebuildRequired: true, blocker: "config_encoding_fallbacks"}, nil
 	}
 	indexedRoot := meta["root"]
 	if indexedRoot != "" && indexedRoot != root {

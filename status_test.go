@@ -94,7 +94,7 @@ func TestStatusJSONUsesNativeTypesAndNulls(t *testing.T) {
 		"db":                      db,
 		"exists":                  true,
 		"locked":                  false,
-		"schema_version":          float64(3),
+		"schema_version":          float64(4),
 		"config_max_bytes":        float64(defaultMaxBytes),
 		"fts5":                    hasFTS5(),
 		"current_vcs_dirty":       false,
