@@ -163,6 +163,15 @@ Find symbol definitions:
 
 Use `--list` without `QUERY` to list definitions ordered by path and source position. `--kind`, `--language`, and `--limit` apply to both listing and searching. Combining `--list` with `QUERY` is an error.
 
+Show the symbols in one indexed file:
+
+```sh
+./code-index outline --root /path/to/repo path/to/file.go
+./code-index outline --root /path/to/repo --format json path/to/file.go
+```
+
+`outline` returns symbols in source order. It prefers an exact repository-relative path and also accepts a path suffix such as `file.go`.
+
 Find files:
 
 ```sh
@@ -210,7 +219,7 @@ Show indexed code metrics:
 ./code-index metrics --root /path/to/repo --format json
 ```
 
-For `defs`, `files`, `show`, and `metrics`, the JSON format emits an array of objects, uses native JSON numbers, preserves nullable fields as `null`, and emits `[]` when there are no rows.
+For `defs`, `outline`, `files`, `show`, and `metrics`, the JSON format emits an array of objects, uses native JSON numbers, preserves nullable fields as `null`, and emits `[]` when there are no rows.
 
 Show index-wide counts and build metadata:
 

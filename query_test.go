@@ -178,6 +178,21 @@ func TestQueryCommandsJSONOutput(t *testing.T) {
 		t.Fatalf("defs --list text = %q", defsText)
 	}
 
+	var outline []defsJSONRow
+	decodeRunJSON(t, []string{"outline", "--db", db, "--format", "json", "main.go"}, &outline)
+	if len(outline) != 1 || outline[0].Path != "main.go" || outline[0].Line != 3 || outline[0].Name != "main" {
+		t.Fatalf("outline JSON = %#v", outline)
+	}
+	outlineText := captureRunOutput(t, []string{"outline", "--db", db, "main.go"})
+	if !strings.Contains(outlineText, "path\tline\tkind\tname\tlanguage\tsignature") || !strings.Contains(outlineText, "main.go\t3\tfunction\tmain") {
+		t.Fatalf("outline text = %q", outlineText)
+	}
+	var missingOutline []defsJSONRow
+	decodeRunJSON(t, []string{"outline", "--db", db, "--format", "json", "missing.go"}, &missingOutline)
+	if missingOutline == nil || len(missingOutline) != 0 {
+		t.Fatalf("missing outline JSON = %#v, want []", missingOutline)
+	}
+
 	var files []filesJSONRow
 	decodeRunJSON(t, []string{"files", "--db", db, "--format", "json", "main"}, &files)
 	if len(files) != 1 || files[0].Path != "main.go" || files[0].Size != int64(len(content)) || files[0].Language == nil || *files[0].Language != "go" {
@@ -217,6 +232,7 @@ func TestQueryCommandsJSONOutput(t *testing.T) {
 
 	invalidFormatArgs := [][]string{
 		{"defs", "--db", db, "--format", "yaml", "main"},
+		{"outline", "--db", db, "--format", "yaml", "main.go"},
 		{"files", "--db", db, "--format", "yaml", "main"},
 		{"show", "--db", db, "--line", "1", "--format", "yaml", "main.go"},
 		{"metrics", "--db", db, "--format", "yaml"},
@@ -225,6 +241,9 @@ func TestQueryCommandsJSONOutput(t *testing.T) {
 		if err := run(args); err == nil || !strings.Contains(err.Error(), "unsupported output format") {
 			t.Fatalf("%s with unsupported format error = %v", args[0], err)
 		}
+	}
+	if err := run([]string{"outline", "--db", db}); err == nil {
+		t.Fatal("outline without path succeeded, want failure")
 	}
 	invalidListArgs := [][]string{
 		{"defs", "--db", db, "--list", "main"},

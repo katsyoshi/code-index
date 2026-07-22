@@ -35,6 +35,7 @@ var commands = []command{
 	{name: "rebuild", usage: "code-index rebuild [--db DB] [--max-bytes N] [--format text|json] [ROOT]", summary: "atomically rebuild the full index"},
 	{name: "update", usage: "code-index update [--db DB] [--max-bytes N] [--adopt] [--format text|json] [ROOT]", summary: "create or incrementally refresh the index"},
 	{name: "defs", usage: "code-index defs [--root ROOT|--db DB] [--kind KIND] [--language LANG] [--list] [--format text|json] [QUERY]", summary: "list or find symbol definitions"},
+	{name: "outline", usage: "code-index outline [--root ROOT|--db DB] [--format text|json] PATH", summary: "show symbols in one indexed file"},
 	{name: "files", usage: "code-index files [--root ROOT|--db DB] [--language LANG] [--list] [--format text|json] [QUERY]", summary: "list or find indexed files"},
 	{name: "sql", usage: "code-index sql [--root ROOT|--db DB] [--format text|json] [SQL]", summary: "run read-only SQL"},
 	{name: "show", usage: "code-index show [--root ROOT|--db DB] --line N [--context N] [--format text|json] PATH", summary: "show indexed source around a line"},
@@ -73,6 +74,8 @@ func commandHandler(name string) func([]string) error {
 		return cmdUpdate
 	case "defs":
 		return cmdDefs
+	case "outline":
+		return cmdOutline
 	case "files":
 		return cmdFiles
 	case "sql":

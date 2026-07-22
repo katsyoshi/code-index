@@ -1,5 +1,6 @@
 /code-index
 /.local/
+/.codex/
 /skills/code-index/exec/*
 /*.md
 *.sqlite

@@ -158,6 +158,37 @@ func cmdDefs(args []string) error {
 	return writeJSON(os.Stdout, rows)
 }
 
+func cmdOutline(args []string) error {
+	fs := flag.NewFlagSet("outline", flag.ExitOnError)
+	root := fs.String("root", "", "repository root for default database path")
+	db := fs.String("db", "", "database path")
+	formatFlag := fs.String("format", "text", "output format: text or json")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return errors.New(commandUsage("outline"))
+	}
+	format, err := parseOutputFormat(*formatFlag)
+	if err != nil {
+		return err
+	}
+	path := strings.TrimPrefix(filepath.ToSlash(fs.Arg(0)), "/")
+	sql := formatEmbeddedSQL("outline.sql", quote(path), quote("%/"+path), quote(path))
+	dbPath, _, err := resolveDB(*db, *root)
+	if err != nil {
+		return err
+	}
+	if format == outputFormatText {
+		return runSQLitePrint(dbPath, sql)
+	}
+	rows := make([]defsJSONRow, 0)
+	if err := sqliteJSONQuery(dbPath, sql, &rows); err != nil {
+		return err
+	}
+	return writeJSON(os.Stdout, rows)
+}
+
 func cmdFiles(args []string) error {
 	fs := flag.NewFlagSet("files", flag.ExitOnError)
 	root := fs.String("root", "", "repository root for default database path")
